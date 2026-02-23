@@ -9,9 +9,9 @@ security definer
 set search_path = public
 as $$
 begin
-  -- 1. Create user preferences with EUR as default base currency
+  -- 1. Create user preferences with USD as default base currency
   insert into user_preferences (user_id, base_currency, fx_source)
-  values (new.id, 'EUR', 'frankfurter');
+  values (new.id, 'USD', 'frankfurter');
 
   -- 2. Seed the 6 system budget categories
   insert into budget_categories (user_id, category_type, name, display_order, is_system)

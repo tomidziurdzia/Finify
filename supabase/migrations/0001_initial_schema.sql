@@ -58,7 +58,7 @@ create table currencies (
 -- ============================================================
 create table user_preferences (
   user_id           uuid primary key references auth.users(id) on delete cascade,
-  base_currency     text not null default 'EUR' references currencies(code),
+  base_currency     text not null default 'USD' references currencies(code),
   fx_source         text not null default 'frankfurter',
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
@@ -123,7 +123,7 @@ create table budget_subcategories (
   category_id         uuid not null references budget_categories(id) on delete restrict,
   name                text not null,
   monthly_amount      numeric(18,2) not null default 0,
-  currency            text not null default 'EUR' references currencies(code),
+  currency            text not null default 'USD' references currencies(code),
   rollover_enabled    boolean not null default false,
   display_order       int not null default 0,
   is_active           boolean not null default true,
