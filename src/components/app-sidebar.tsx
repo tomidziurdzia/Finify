@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Home,
+  Landmark,
   Settings,
   LogOut,
   LucideIcon,
@@ -137,6 +138,11 @@ export function AppSidebar() {
                 href="/budget"
                 icon={CalendarDays}
                 label="Presupuesto"
+              />
+              <CollapsedDropdownItem
+                href="/accounts"
+                icon={Landmark}
+                label="Cuentas"
               />
               <CollapsedDropdownItem
                 href="/net-worth"
