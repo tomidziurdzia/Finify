@@ -1,6 +1,12 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { AppSidebar } from "@/components/app-sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 
 async function DashboardLayoutContent({
   children,
@@ -15,12 +21,17 @@ async function DashboardLayoutContent({
   }
 
   return (
-    <div className="flex min-h-svh flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <span className="font-semibold">Finify</span>
-      </header>
-      <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
-    </div>
+    <SidebarProvider defaultOpen={false} className="h-svh overflow-hidden">
+      <AppSidebar />
+      <SidebarInset className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+          <SidebarTrigger className="-ml-1 size-9 shrink-0" />
+        </header>
+        <div className="flex-1 overflow-auto p-4 md:p-6">
+          {children}
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
