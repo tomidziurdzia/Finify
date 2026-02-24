@@ -103,6 +103,3 @@ CREATE TRIGGER set_accounts_updated_at
   BEFORE UPDATE ON public.accounts
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_updated_at();
-
-ALTER TABLE public.accounts DROP CONSTRAINT accounts_user_id_name_key;
-ALTER TABLE public.accounts ADD CONSTRAINT accounts_user_id_name_currency_key UNIQUE (user_id, name, currency);
