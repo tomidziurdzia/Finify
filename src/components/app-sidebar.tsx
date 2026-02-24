@@ -4,13 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Home,
-  Landmark,
   Settings,
   LogOut,
   LucideIcon,
   BarChart3,
   CalendarDays,
-  Tags,
   Wallet,
 } from "lucide-react";
 import {
@@ -141,19 +139,9 @@ export function AppSidebar() {
                 label="Presupuesto"
               />
               <CollapsedDropdownItem
-                href="/accounts"
-                icon={Landmark}
-                label="Cuentas"
-              />
-              <CollapsedDropdownItem
                 href="/net-worth"
                 icon={BarChart3}
                 label="Patrimonio"
-              />
-              <CollapsedDropdownItem
-                href="/categories"
-                icon={Tags}
-                label="Categorías"
               />
               <CollapsedDropdownItem
                 href="/settings"
