@@ -19,17 +19,28 @@ async function getUserId() {
   return user.id;
 }
 
-// --- SEED: solo user_preferences para usuarios existentes ---
+// --- SEED: solo user_preferences para usuarios existentes (no sobrescribe si ya existen) ---
 export async function ensureBudgetSeed(): Promise<ActionResult<null>> {
   try {
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
 
     const supabase = await createClient();
-    await supabase.from("user_preferences").upsert(
-      { user_id: userId, base_currency: "USD", fx_source: "frankfurter" },
-      { onConflict: "user_id" }
-    );
+    const { data: existing } = await supabase
+      .from("user_preferences")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existing) return { data: null };
+
+    const { error } = await supabase.from("user_preferences").insert({
+      user_id: userId,
+      base_currency: "USD",
+      fx_source: "frankfurter",
+    });
+
+    if (error) return { error: error.message };
     return { data: null };
   } catch {
     return { error: "Error al cargar preferencias" };
@@ -159,12 +170,16 @@ export async function updateCategory(
         error: parsed.error.issues[0]?.message ?? "Datos inválidos",
       };
 
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
     const { id, ...updates } = parsed.data;
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("budget_categories")
       .update(updates)
       .eq("id", id)
+      .eq("user_id", userId)
       .select()
       .single();
 
@@ -180,11 +195,15 @@ export async function updateCategory(
 
 export async function deleteCategory(id: string): Promise<ActionResult<null>> {
   try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
     const supabase = await createClient();
     const { error } = await supabase
       .from("budget_categories")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("user_id", userId);
 
     if (error) return { error: error.message };
     return { data: null };

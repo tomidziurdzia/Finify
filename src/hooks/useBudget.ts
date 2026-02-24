@@ -37,8 +37,10 @@ export function useBudgetYears() {
 export function useOrCreateBudgetYear(year: number | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (y: number) => {
-      const result = await getOrCreateBudgetYear(y);
+    mutationFn: async (y?: number) => {
+      const yr = y ?? year;
+      if (yr == null) throw new Error("Año requerido");
+      const result = await getOrCreateBudgetYear(yr);
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
