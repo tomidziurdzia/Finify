@@ -25,7 +25,6 @@ export interface Account {
   account_type: AccountType;
   currency: string;
   is_active: boolean;
-  display_order: number;
   notes: string | null;
   created_at: string;
   updated_at: string;

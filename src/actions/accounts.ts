@@ -22,7 +22,6 @@ export async function getAccounts(): Promise<ActionResult<Account[]>> {
       .from("accounts")
       .select("*")
       .eq("user_id", user.id)
-      .order("display_order", { ascending: true })
       .order("name", { ascending: true });
 
     if (error) return { error: error.message };

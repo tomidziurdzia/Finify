@@ -23,7 +23,6 @@ export const CreateAccountSchema = z.object({
 export const UpdateAccountSchema = CreateAccountSchema.partial().extend({
   id: z.string().uuid("ID de cuenta no válido"),
   is_active: z.boolean().optional(),
-  display_order: z.number().int().min(0).optional(),
 });
 
 export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;

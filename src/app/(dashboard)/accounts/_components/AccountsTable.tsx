@@ -27,7 +27,7 @@ import type { Account } from "@/types/accounts";
 import { AccountDialog } from "./AccountDialog";
 
 export function AccountsTable() {
-  const { data: accounts, isLoading } = useAccounts();
+  const { data: accounts, isLoading, isError, error, refetch } = useAccounts();
   const deleteMutation = useDeleteAccount();
 
   // Dialog state
@@ -66,6 +66,23 @@ export function AccountsTable() {
     );
   }
 
+  if (isError && error) {
+    return (
+      <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-center">
+        <p className="text-destructive font-medium">Error al cargar las cuentas</p>
+        <p className="text-muted-foreground mt-1 text-sm">{error.message}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          onClick={() => refetch()}
+        >
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex justify-end">
@@ -75,30 +92,37 @@ export function AccountsTable() {
         </Button>
       </div>
 
-      {!accounts || accounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
-          <p className="text-muted-foreground mb-4 text-sm">
-            No hay cuentas. Creá tu primera cuenta para empezar.
-          </p>
-          <Button onClick={handleCreate} variant="outline" size="sm">
-            <Plus className="mr-1 size-4" />
-            Crear cuenta
-          </Button>
-        </div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nombre</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Moneda</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead className="w-24 text-right">Acciones</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {!accounts || accounts.length === 0 ? (
               <TableRow>
-                <TableHead>Nombre</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Moneda</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="w-24 text-right">Acciones</TableHead>
+                <TableCell
+                  colSpan={5}
+                  className="h-32 text-center text-muted-foreground"
+                >
+                  <div className="flex flex-col items-center justify-center gap-3">
+                    <p className="text-sm">
+                      No hay cuentas. Creá tu primera cuenta para empezar.
+                    </p>
+                    <Button onClick={handleCreate} variant="outline" size="sm">
+                      <Plus className="mr-1 size-4" />
+                      Crear cuenta
+                    </Button>
+                  </div>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {accounts.map((account) => (
+            ) : (
+              accounts.map((account) => (
                 <TableRow key={account.id}>
                   <TableCell className="font-medium">
                     {account.name}
@@ -135,11 +159,11 @@ export function AccountsTable() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
       {/* Create/Edit Dialog */}
       <AccountDialog
