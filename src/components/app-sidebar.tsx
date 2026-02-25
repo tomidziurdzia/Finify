@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Home,
@@ -11,6 +12,7 @@ import {
   BarChart3,
   CalendarDays,
   Wallet,
+  Layers,
 } from "lucide-react";
 import {
   Sidebar,
@@ -43,22 +45,27 @@ function CollapsedDropdownItem({
   icon: Icon,
   label,
   asAnchor,
+  active,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
   asAnchor?: boolean;
+  active?: boolean;
 }) {
   const { state } = useSidebar();
   const mounted = useMounted();
   const collapsed = mounted && state === "collapsed";
 
   const LinkOrAnchor = asAnchor ? "a" : Link;
+  const buttonClass = active
+    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+    : "";
 
   if (!collapsed) {
     return (
       <SidebarMenuItem>
-        <SidebarMenuButton asChild>
+        <SidebarMenuButton asChild className={buttonClass}>
           <LinkOrAnchor href={href}>
             <Icon className="size-4" />
             <span>{label}</span>
@@ -72,7 +79,7 @@ function CollapsedDropdownItem({
     <SidebarMenuItem>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuButton className="cursor-pointer">
+          <SidebarMenuButton className={`cursor-pointer ${buttonClass}`}>
             <Icon className="size-4" />
             <span>{label}</span>
           </SidebarMenuButton>
@@ -88,6 +95,7 @@ function CollapsedDropdownItem({
 }
 
 export function AppSidebar() {
+  const pathname = usePathname();
   const { state } = useSidebar();
   const mounted = useMounted();
   const collapsed = mounted && state === "collapsed";
@@ -133,26 +141,37 @@ export function AppSidebar() {
                 href="/"
                 icon={Home}
                 label="Dashboard"
+                active={pathname === "/"}
               />
               <CollapsedDropdownItem
                 href="/budget"
                 icon={CalendarDays}
                 label="Presupuesto"
+                active={pathname === "/budget"}
+              />
+              <CollapsedDropdownItem
+                href="/budget/categories"
+                icon={Layers}
+                label="Categorías"
+                active={pathname.startsWith("/budget/categories")}
               />
               <CollapsedDropdownItem
                 href="/accounts"
                 icon={Landmark}
                 label="Cuentas"
+                active={pathname.startsWith("/accounts")}
               />
               <CollapsedDropdownItem
                 href="/net-worth"
                 icon={BarChart3}
                 label="Patrimonio"
+                active={pathname.startsWith("/net-worth")}
               />
               <CollapsedDropdownItem
                 href="/settings"
                 icon={Settings}
                 label="Configuración"
+                active={pathname.startsWith("/settings")}
               />
             </SidebarMenu>
           </SidebarGroupContent>
