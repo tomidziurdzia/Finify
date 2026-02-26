@@ -11,6 +11,27 @@ import { lastDayOfMonth, format } from "date-fns";
 
 type ActionResult<T> = { data: T } | { error: string };
 
+// --- GET BASE CURRENCY ---
+export async function getBaseCurrency(): Promise<ActionResult<string>> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "No autenticado" };
+
+    const { data } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", user.id)
+      .single();
+
+    return { data: data?.base_currency ?? "USD" };
+  } catch {
+    return { error: "Error al obtener la moneda base" };
+  }
+}
+
 // --- GET TRANSACTIONS (by month/year) ---
 export async function getTransactions(
   year: number,
