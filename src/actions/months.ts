@@ -1,7 +1,12 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { Month, OpeningBalance } from "@/types/months";
+import type {
+  Month,
+  OpeningBalance,
+  NextMonthPreview,
+  OpeningBalancePreview,
+} from "@/types/months";
 
 type ActionResult<T> = { data: T } | { error: string };
 
@@ -20,6 +25,22 @@ async function getUserId() {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+async function getLatestMonth(
+  userId: string
+): Promise<ActionResult<{ year: number; month: number } | null>> {
+  const supabase = await createClient();
+  const { data: latest, error } = await supabase
+    .from("months")
+    .select("year, month")
+    .eq("user_id", userId)
+    .order("year", { ascending: false })
+    .order("month", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  return { data: latest ?? null };
 }
 
 export async function getMonths(): Promise<ActionResult<Month[]>> {
@@ -52,23 +73,130 @@ export async function createNextMonthFromLatest(): Promise<ActionResult<Month>> 
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
 
-    const supabase = await createClient();
-    const { data: latest, error } = await supabase
-      .from("months")
-      .select("year, month")
-      .eq("user_id", userId)
-      .order("year", { ascending: false })
-      .order("month", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) return { error: error.message };
+    const latestResult = await getLatestMonth(userId);
+    if ("error" in latestResult) return { error: latestResult.error };
+    const latest = latestResult.data;
     if (!latest) return getOrCreateCurrentMonth();
 
     const next = nextYearMonth(latest.year, latest.month);
     return createMonth(next.year, next.month);
   } catch {
     return { error: "Error al crear el próximo mes" };
+  }
+}
+
+export async function previewNextMonthFromLatest(): Promise<
+  ActionResult<NextMonthPreview>
+> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const latestResult = await getLatestMonth(userId);
+    if ("error" in latestResult) return { error: latestResult.error };
+
+    const latest = latestResult.data;
+    const target = latest
+      ? nextYearMonth(latest.year, latest.month)
+      : { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+
+    const supabase = await createClient();
+    const { data: accounts, error: accountsError } = await supabase
+      .from("accounts")
+      .select("id, name, currency")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+    if (accountsError) return { error: accountsError.message };
+
+    const accountIds = (accounts ?? []).map((a) => a.id);
+    const openingsByAccount = new Map<
+      string,
+      { opening_amount: number; opening_base_amount: number }
+    >();
+
+    if (latest && accountIds.length > 0) {
+      const { data: previousMonthRow } = await supabase
+        .from("months")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("year", latest.year)
+        .eq("month", latest.month)
+        .maybeSingle();
+
+      if (previousMonthRow) {
+        const { data: prevOpenings, error: prevOpeningsError } = await supabase
+          .from("opening_balances")
+          .select("account_id, opening_amount, opening_base_amount")
+          .eq("month_id", previousMonthRow.id);
+        if (prevOpeningsError) return { error: prevOpeningsError.message };
+
+        for (const row of prevOpenings ?? []) {
+          openingsByAccount.set(row.account_id, {
+            opening_amount: Number(row.opening_amount),
+            opening_base_amount: Number(row.opening_base_amount),
+          });
+        }
+
+        const { data: prevMovements, error: prevMovementsError } = await supabase
+          .from("transaction_amounts")
+          .select("account_id, amount, base_amount, transactions!inner(month_id)")
+          .eq("transactions.month_id", previousMonthRow.id);
+        if (prevMovementsError) return { error: prevMovementsError.message };
+
+        for (const row of prevMovements ?? []) {
+          const current = openingsByAccount.get(row.account_id) ?? {
+            opening_amount: 0,
+            opening_base_amount: 0,
+          };
+          openingsByAccount.set(row.account_id, {
+            opening_amount: current.opening_amount + Number(row.amount),
+            opening_base_amount:
+              current.opening_base_amount + Number(row.base_amount),
+          });
+        }
+      }
+    }
+
+    const currencyCodes = Array.from(
+      new Set((accounts ?? []).map((acc) => acc.currency))
+    );
+    const symbolByCode = new Map<string, string>();
+    if (currencyCodes.length > 0) {
+      const { data: currencyRows } = await supabase
+        .from("currencies")
+        .select("code, symbol")
+        .in("code", currencyCodes);
+      for (const row of currencyRows ?? []) {
+        symbolByCode.set(row.code, row.symbol);
+      }
+    }
+
+    const balances: OpeningBalancePreview[] = (accounts ?? []).map((account) => {
+      const opening = openingsByAccount.get(account.id) ?? {
+        opening_amount: 0,
+        opening_base_amount: 0,
+      };
+      return {
+        account_id: account.id,
+        account_name: account.name,
+        account_currency: account.currency,
+        account_currency_symbol:
+          symbolByCode.get(account.currency) ?? account.currency,
+        opening_amount: opening.opening_amount,
+        opening_base_amount: opening.opening_base_amount,
+      };
+    });
+
+    return {
+      data: {
+        year: target.year,
+        month: target.month,
+        balances,
+      },
+    };
+  } catch {
+    return { error: "Error al previsualizar el próximo mes" };
   }
 }
 

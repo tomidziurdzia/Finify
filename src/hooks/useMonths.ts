@@ -6,6 +6,7 @@ import {
   getMonths,
   getOpeningBalances,
   getOrCreateCurrentMonth,
+  previewNextMonthFromLatest,
 } from "@/actions/months";
 import { toast } from "sonner";
 
@@ -51,6 +52,17 @@ export function useCreateNextMonth() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MONTH_KEYS.all });
       toast.success("Mes creado y saldos arrastrados correctamente");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+}
+
+export function usePreviewNextMonth() {
+  return useMutation({
+    mutationFn: async () => {
+      const result = await previewNextMonthFromLatest();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
     },
     onError: (error: Error) => toast.error(error.message),
   });

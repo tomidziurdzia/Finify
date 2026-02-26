@@ -37,6 +37,13 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   useTransactions,
   useDeleteTransaction,
   useBaseCurrency,
@@ -45,6 +52,7 @@ import {
   useMonths,
   useEnsureCurrentMonth,
   useCreateNextMonth,
+  usePreviewNextMonth,
   useOpeningBalances,
 } from "@/hooks/useMonths";
 import { useCurrencies } from "@/hooks/useAccounts";
@@ -55,6 +63,7 @@ import {
 import { TransactionDialog } from "./TransactionDialog";
 import { TransferDialog } from "./TransferDialog";
 import { parseISO, format } from "date-fns";
+import type { NextMonthPreview } from "@/types/months";
 
 const MONTHS = [
   "Enero",
@@ -76,6 +85,12 @@ function formatAmount(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function amountTone(value: number): string {
+  if (value > 0) return "text-green-600";
+  if (value < 0) return "text-red-600";
+  return "text-muted-foreground";
 }
 
 const TYPE_BADGE_STYLES: Record<string, string> = {
@@ -105,10 +120,14 @@ export function TransactionsTable() {
     useState<TransactionWithRelations | null>(null);
   const [deletingTx, setDeletingTx] =
     useState<TransactionWithRelations | null>(null);
+  const [createMonthDialogOpen, setCreateMonthDialogOpen] = useState(false);
+  const [nextMonthPreview, setNextMonthPreview] =
+    useState<NextMonthPreview | null>(null);
 
   const { data: months } = useMonths();
   const ensureCurrentMonth = useEnsureCurrentMonth();
   const createNextMonth = useCreateNextMonth();
+  const previewNextMonth = usePreviewNextMonth();
   const sortedMonths = months ?? [];
 
   useEffect(() => {
@@ -309,8 +328,20 @@ export function TransactionsTable() {
 
   const handleCreateNextMonth = async () => {
     try {
+      const preview = await previewNextMonth.mutateAsync();
+      setNextMonthPreview(preview);
+      setCreateMonthDialogOpen(true);
+    } catch {
+      // Error handled by mutation onError (toast)
+    }
+  };
+
+  const handleConfirmCreateMonth = async () => {
+    try {
       const month = await createNextMonth.mutateAsync();
       setSelectedMonthId(month.id);
+      setCreateMonthDialogOpen(false);
+      setNextMonthPreview(null);
     } catch {
       // Error handled by mutation onError (toast)
     }
@@ -368,9 +399,9 @@ export function TransactionsTable() {
             variant="outline"
             size="sm"
             onClick={handleCreateNextMonth}
-            disabled={createNextMonth.isPending}
+            disabled={createNextMonth.isPending || previewNextMonth.isPending}
           >
-            {createNextMonth.isPending ? "Creando..." : "Nuevo mes"}
+            {previewNextMonth.isPending ? "Calculando..." : "Nuevo mes"}
           </Button>
         </div>
         <div className="flex items-center gap-2">
@@ -399,12 +430,25 @@ export function TransactionsTable() {
             Arrastrados automáticamente desde el mes anterior.
           </p>
           {openingBalances && openingBalances.length > 0 ? (
-            <div className="grid gap-1 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {openingBalances.map((ob) => (
-                <div key={ob.id} className="text-sm">
-                  <span className="text-muted-foreground">{ob.account_name}:</span>{" "}
-                  {ob.account_currency_symbol} {formatAmount(ob.opening_amount)}
-                </div>
+                <Card key={ob.id} className="gap-0 overflow-hidden py-0">
+                  <CardHeader className="bg-muted/35 px-4 py-3">
+                    <CardTitle className="text-sm">{ob.account_name}</CardTitle>
+                    <CardDescription className="text-xs">
+                      {ob.account_currency}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-1 px-4 py-3">
+                    <p className={`text-base font-semibold ${amountTone(ob.opening_amount)}`}>
+                      {ob.account_currency_symbol} {formatAmount(ob.opening_amount)}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      Base: {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+                      {formatAmount(ob.opening_base_amount)}
+                    </p>
+                  </CardContent>
+                </Card>
               ))}
             </div>
           ) : (
@@ -527,6 +571,87 @@ export function TransactionsTable() {
               disabled={deleteMutation.isPending}
             >
               {deleteMutation.isPending ? "Eliminando..." : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={createMonthDialogOpen}
+        onOpenChange={(open) => {
+          setCreateMonthDialogOpen(open);
+          if (!open) setNextMonthPreview(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Crear nuevo mes</DialogTitle>
+            <DialogDescription>
+              {nextMonthPreview
+                ? `Vas a crear ${MONTHS[nextMonthPreview.month - 1]} ${nextMonthPreview.year}. Revisá los saldos iniciales por cuenta antes de confirmar.`
+                : "Calculando saldos iniciales..."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!nextMonthPreview ? (
+            <div className="space-y-2">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-auto pr-1">
+              {nextMonthPreview.balances.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  No hay cuentas activas para inicializar saldos.
+                </p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {nextMonthPreview.balances.map((balance) => (
+                    <Card key={balance.account_id} className="gap-0 overflow-hidden py-0">
+                      <CardHeader className="bg-muted/35 px-4 py-3">
+                        <CardTitle className="text-sm">{balance.account_name}</CardTitle>
+                        <CardDescription className="text-xs">
+                          {balance.account_currency}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-1 px-4 py-3">
+                        <p
+                          className={`text-base font-semibold ${amountTone(
+                            balance.opening_amount
+                          )}`}
+                        >
+                          {balance.account_currency_symbol}{" "}
+                          {formatAmount(balance.opening_amount)}
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                          Base: {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+                          {formatAmount(balance.opening_base_amount)}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateMonthDialogOpen(false);
+                setNextMonthPreview(null);
+              }}
+              disabled={createNextMonth.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmCreateMonth}
+              disabled={!nextMonthPreview || createNextMonth.isPending}
+            >
+              {createNextMonth.isPending ? "Creando..." : "Confirmar y crear"}
             </Button>
           </DialogFooter>
         </DialogContent>

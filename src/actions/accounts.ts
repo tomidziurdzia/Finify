@@ -49,7 +49,7 @@ export async function getCurrencies(): Promise<ActionResult<Currency[]>> {
 
 // --- CREATE ACCOUNT ---
 export async function createAccount(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<Account>> {
   try {
     const parsed = CreateAccountSchema.safeParse(input);
@@ -77,6 +77,29 @@ export async function createAccount(
       }
       return { error: error.message };
     }
+
+    const { data: months, error: monthsError } = await supabase
+      .from("months")
+      .select("id")
+      .eq("user_id", user.id);
+
+    if (monthsError) return { error: monthsError.message };
+
+    const openingRows = (months ?? []).map((month) => ({
+      month_id: month.id,
+      account_id: data.id,
+      opening_amount: 0,
+      opening_base_amount: 0,
+    }));
+
+    if (openingRows.length > 0) {
+      const { error: openingError } = await supabase
+        .from("opening_balances")
+        .upsert(openingRows, { onConflict: "month_id,account_id" });
+
+      if (openingError) return { error: openingError.message };
+    }
+
     return { data: data as Account };
   } catch {
     return { error: "Error al crear la cuenta" };
@@ -85,7 +108,7 @@ export async function createAccount(
 
 // --- UPDATE ACCOUNT ---
 export async function updateAccount(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<Account>> {
   try {
     const parsed = UpdateAccountSchema.safeParse(input);
@@ -123,9 +146,7 @@ export async function updateAccount(
 }
 
 // --- DELETE ACCOUNT ---
-export async function deleteAccount(
-  id: string
-): Promise<ActionResult<null>> {
+export async function deleteAccount(id: string): Promise<ActionResult<null>> {
   try {
     const supabase = await createClient();
     const {
