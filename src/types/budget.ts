@@ -34,3 +34,70 @@ export interface BudgetCategory {
   created_at: string;
   updated_at: string;
 }
+
+export const BUDGET_RULE_MODES = ["set", "add"] as const;
+
+export type BudgetRuleMode = (typeof BUDGET_RULE_MODES)[number];
+
+export interface BudgetLine {
+  id: string;
+  user_id: string;
+  category_id: string;
+  name: string;
+  display_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BudgetMonthPlan {
+  id: string;
+  line_id: string;
+  month_id: string;
+  planned_amount: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BudgetLineWithPlan extends BudgetLine {
+  category_name: string;
+  category_type: BudgetCategoryType;
+  month_id: string;
+  plan_id: string | null;
+  planned_amount: number;
+}
+
+export interface BudgetRecurrenceRule {
+  id: string;
+  line_id: string;
+  start_month_id: string;
+  end_month_id: string | null;
+  mode: BudgetRuleMode;
+  amount: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BudgetRecurrenceRuleWithLine extends BudgetRecurrenceRule {
+  line_name: string;
+  category_name: string;
+}
+
+export interface BudgetCategorySummary {
+  category_id: string;
+  category_name: string;
+  category_type: BudgetCategoryType;
+  planned_amount: number;
+  actual_amount: number;
+  variance: number;
+}
+
+export interface BudgetSummaryVsActual {
+  totals: {
+    planned: number;
+    actual: number;
+    variance: number;
+  };
+  categories: BudgetCategorySummary[];
+}

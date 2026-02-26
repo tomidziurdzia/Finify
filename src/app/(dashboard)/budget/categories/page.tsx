@@ -17,13 +17,6 @@ import { BUDGET_CATEGORY_LABELS } from "@/types/budget";
 import type { BudgetCategory } from "@/types/budget";
 import { CategoryDialog } from "../_components/CategoryDialog";
 
-function formatAmount(value: number): string {
-  return new Intl.NumberFormat("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
 export default function BudgetCategoriesPage() {
   const { data: categories, isLoading, isError, error } = useBudgetCategories();
   const deleteMutation = useDeleteCategory();
@@ -73,7 +66,7 @@ export default function BudgetCategoriesPage() {
         <div>
           <h1 className="text-2xl font-bold">Categorías</h1>
           <p className="text-muted-foreground text-sm">
-            Creá categorías y asignales un tipo de movimiento y monto mensual.
+            Creá categorías y asignales un tipo de movimiento.
           </p>
         </div>
         <Button size="sm" onClick={handleCreate}>
@@ -88,7 +81,6 @@ export default function BudgetCategoriesPage() {
             <TableRow>
               <TableHead>Nombre</TableHead>
               <TableHead>Tipo de movimiento</TableHead>
-              <TableHead className="text-right">Monto mensual</TableHead>
               <TableHead className="w-24 text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -96,7 +88,7 @@ export default function BudgetCategoriesPage() {
             {!categories || categories.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={4}
+                  colSpan={3}
                   className="h-32 text-center text-muted-foreground"
                 >
                   No hay categorías. Creá la primera.
@@ -108,9 +100,6 @@ export default function BudgetCategoriesPage() {
                   <TableCell className="font-medium">{cat.name}</TableCell>
                   <TableCell>
                     {BUDGET_CATEGORY_LABELS[cat.category_type]}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatAmount(Number(cat.monthly_amount))}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
