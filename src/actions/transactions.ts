@@ -83,7 +83,7 @@ export async function getTransactions(
       .select(
         `
         *,
-        budget_categories ( name ),
+        budget_categories ( name, category_type ),
         transaction_amounts (
           id,
           transaction_id,
@@ -118,6 +118,7 @@ export async function getTransactions(
       created_at: row.created_at,
       updated_at: row.updated_at,
       category_name: row.budget_categories?.name ?? null,
+      category_type: row.budget_categories?.category_type ?? null,
       amounts: (row.transaction_amounts ?? []).map(
         (line: any): TransactionAmountWithRelations => ({
           id: line.id,

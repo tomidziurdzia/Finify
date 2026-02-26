@@ -1,3 +1,5 @@
+import type { BudgetCategoryType } from "@/types/budget";
+
 export const TRANSACTION_TYPES = [
   "income",
   "expense",
@@ -45,5 +47,6 @@ export interface TransactionAmountWithRelations extends TransactionAmount {
 
 export interface TransactionWithRelations extends Transaction {
   category_name: string | null;
+  category_type: BudgetCategoryType | null;
   amounts: TransactionAmountWithRelations[];
 }
