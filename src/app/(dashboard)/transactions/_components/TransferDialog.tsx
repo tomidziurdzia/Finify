@@ -34,12 +34,14 @@ import { Loader2 } from "lucide-react";
 
 interface TransferDialogProps {
   transfer: TransactionWithRelations | null;
+  monthId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export function TransferDialog({
   transfer,
+  monthId,
   open,
   onOpenChange,
 }: TransferDialogProps) {
@@ -142,13 +144,28 @@ export function TransferDialog({
 
   useEffect(() => {
     if (transfer) {
+      const sourceLine =
+        transfer.amounts.find((line) => line.amount < 0) ?? transfer.amounts[0];
+      const destinationLine =
+        transfer.amounts.find((line) => line.amount > 0) ?? transfer.amounts[1];
+
       setDate(transfer.date);
-      setSourceAccountId(transfer.account_id);
-      setDestinationAccountId("");
+      setSourceAccountId(sourceLine?.account_id ?? "");
+      setDestinationAccountId(destinationLine?.account_id ?? "");
       setDescription(transfer.description);
-      setAmount(formatNumberInput(String(transfer.amount).replace(".", ",")));
-      setExchangeRate(formatNumberInput(String(transfer.exchange_rate).replace(".", ",")));
-      setBaseAmount(formatNumberInput(String(transfer.base_amount).replace(".", ",")));
+      setAmount(
+        formatNumberInput(
+          String(Math.abs(sourceLine?.amount ?? 0)).replace(".", ",")
+        )
+      );
+      setExchangeRate(
+        formatNumberInput(String(sourceLine?.exchange_rate ?? 1).replace(".", ","))
+      );
+      setBaseAmount(
+        formatNumberInput(
+          String(Math.abs(sourceLine?.base_amount ?? 0)).replace(".", ",")
+        )
+      );
       setNotes(transfer.notes ?? "");
     } else {
       setDate(format(new Date(), "yyyy-MM-dd"));
@@ -224,9 +241,20 @@ export function TransferDialog({
           id: transfer.id,
           date,
           description,
-          amount: isNaN(amountNum) ? 0 : amountNum,
-          exchange_rate: isNaN(rateNum) ? 1 : rateNum,
-          base_amount: isNaN(baseNum) ? 0 : baseNum,
+          amounts: [
+            {
+              account_id: sourceAccountId,
+              amount: -Math.abs(isNaN(amountNum) ? 0 : amountNum),
+              exchange_rate: isNaN(rateNum) ? 1 : rateNum,
+              base_amount: -Math.abs(isNaN(baseNum) ? 0 : baseNum),
+            },
+            {
+              account_id: destinationAccountId,
+              amount: Math.abs(isNaN(amountNum) ? 0 : amountNum),
+              exchange_rate: isNaN(rateNum) ? 1 : rateNum,
+              base_amount: Math.abs(isNaN(baseNum) ? 0 : baseNum),
+            },
+          ],
           category_id: null,
           notes: notes || null,
         });
@@ -238,6 +266,7 @@ export function TransferDialog({
     }
 
     const formData = {
+      month_id: monthId,
       date,
       source_account_id: sourceAccountId,
       destination_account_id: destinationAccountId,
