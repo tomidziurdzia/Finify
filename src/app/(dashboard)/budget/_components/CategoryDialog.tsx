@@ -38,7 +38,6 @@ export function CategoryDialog({
   const isEditing = !!category;
   const [name, setName] = useState("");
   const [categoryType, setCategoryType] = useState<string>("essential_expenses");
-  const [monthlyAmount, setMonthlyAmount] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const createMutation = useCreateCategory();
   const updateMutation = useUpdateCategory();
@@ -47,11 +46,9 @@ export function CategoryDialog({
     if (category) {
       setName(category.name);
       setCategoryType(category.category_type);
-      setMonthlyAmount(String(category.monthly_amount));
     } else {
       setName("");
       setCategoryType("essential_expenses");
-      setMonthlyAmount("");
     }
     setErrors({});
   }, [category, open]);
@@ -59,11 +56,10 @@ export function CategoryDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
-    const amount = parseFloat(monthlyAmount.replace(",", "."));
     const parsed = CreateCategorySchema.safeParse({
       name: name.trim(),
       category_type: categoryType,
-      monthly_amount: isNaN(amount) ? 0 : amount,
+      monthly_amount: 0,
     });
     if (!parsed.success) {
       const fieldErrors: Record<string, string> = {};
@@ -97,8 +93,8 @@ export function CategoryDialog({
           </DialogTitle>
           <DialogDescription>
             {isEditing
-              ? "Modificá el nombre, tipo de movimiento o monto mensual."
-              : "Agregá una categoría con su tipo de movimiento y monto estimado."}
+              ? "Modificá el nombre y tipo de movimiento."
+              : "Agregá una categoría con su tipo de movimiento."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -136,23 +132,6 @@ export function CategoryDialog({
             {errors.category_type && (
               <p className="text-destructive text-sm">
                 {errors.category_type}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cat-amount">Monto mensual</Label>
-            <Input
-              id="cat-amount"
-              type="text"
-              inputMode="decimal"
-              placeholder="0.00"
-              value={monthlyAmount}
-              onChange={(e) => setMonthlyAmount(e.target.value)}
-              disabled={isPending}
-            />
-            {errors.monthly_amount && (
-              <p className="text-destructive text-sm">
-                {errors.monthly_amount}
               </p>
             )}
           </div>
