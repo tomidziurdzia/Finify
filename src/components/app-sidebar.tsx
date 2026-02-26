@@ -13,6 +13,7 @@ import {
   CalendarDays,
   Wallet,
   Layers,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Sidebar,
@@ -154,6 +155,12 @@ export function AppSidebar() {
                 icon={Layers}
                 label="Categorías"
                 active={pathname.startsWith("/budget/categories")}
+              />
+              <CollapsedDropdownItem
+                href="/transactions"
+                icon={ArrowLeftRight}
+                label="Transacciones"
+                active={pathname.startsWith("/transactions")}
               />
               <CollapsedDropdownItem
                 href="/accounts"
