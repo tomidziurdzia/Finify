@@ -4,14 +4,25 @@ import { useState, useMemo, useEffect } from "react";
 import {
   useReactTable,
   getCoreRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
   getSortedRowModel,
   flexRender,
   type ColumnDef,
+  type ColumnFiltersState,
+  type PaginationState,
   type SortingState,
 } from "@tanstack/react-table";
-import { Plus, Pencil, Trash2, ArrowLeftRight, ArrowUpDown } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  ArrowLeftRight,
+  ArrowUpDown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -109,17 +120,26 @@ const AMOUNT_COLOR: Record<string, string> = {
 
 export function TransactionsTable() {
   const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "date", desc: true },
+  ]);
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10,
+  });
 
   const [txDialogOpen, setTxDialogOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<TransactionWithRelations | null>(
-    null
+    null,
   );
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [editingTransfer, setEditingTransfer] =
     useState<TransactionWithRelations | null>(null);
-  const [deletingTx, setDeletingTx] =
-    useState<TransactionWithRelations | null>(null);
+  const [deletingTx, setDeletingTx] = useState<TransactionWithRelations | null>(
+    null,
+  );
   const [createMonthDialogOpen, setCreateMonthDialogOpen] = useState(false);
   const [nextMonthPreview, setNextMonthPreview] =
     useState<NextMonthPreview | null>(null);
@@ -163,11 +183,33 @@ export function TransactionsTable() {
 
   const baseCurrencySymbol = useMemo(() => {
     if (!baseCurrency) return "";
-    const found = currencies?.find((currency) => currency.code === baseCurrency);
+    const found = currencies?.find(
+      (currency) => currency.code === baseCurrency,
+    );
     return found?.symbol ?? baseCurrency;
   }, [baseCurrency, currencies]);
 
   const tableTransactions = useMemo(() => transactions ?? [], [transactions]);
+
+  const accountFilterOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const tx of tableTransactions) {
+      const accountName =
+        (tx.transaction_type === "transfer"
+          ? tx.amounts.find((line) => line.amount < 0)?.account_name
+          : tx.amounts[0]?.account_name) ?? null;
+      if (accountName) values.add(accountName);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [tableTransactions]);
+
+  const categoryFilterOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const tx of tableTransactions) {
+      if (tx.category_name) values.add(tx.category_name);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [tableTransactions]);
 
   const getPrimaryLine = (tx: TransactionWithRelations) => {
     if (tx.amounts.length === 0) return null;
@@ -176,6 +218,92 @@ export function TransactionsTable() {
     }
     return tx.amounts[0];
   };
+
+  const monthSummary = useMemo(() => {
+    const openingBase = (openingBalances ?? []).reduce(
+      (acc, balance) => acc + balance.opening_base_amount,
+      0,
+    );
+    const sumByCategoryType = (
+      categoryType: TransactionWithRelations["category_type"],
+    ) =>
+      tableTransactions.reduce((acc, tx) => {
+        if (tx.transaction_type === "transfer") return acc;
+        if (tx.category_type !== categoryType) return acc;
+        return acc + Math.abs(getPrimaryLine(tx)?.base_amount ?? 0);
+      }, 0);
+
+    const netMonth = tableTransactions.reduce((acc, tx) => {
+      if (tx.transaction_type === "transfer") return acc;
+      return acc + (getPrimaryLine(tx)?.base_amount ?? 0);
+    }, 0);
+
+    const income = tableTransactions.reduce((acc, tx) => {
+      if (tx.transaction_type !== "income") return acc;
+      return acc + Math.abs(getPrimaryLine(tx)?.base_amount ?? 0);
+    }, 0);
+
+    const essentialExpenses = sumByCategoryType("essential_expenses");
+    const discretionaryExpenses = sumByCategoryType("discretionary_expenses");
+    const debtPayments = sumByCategoryType("debt_payments");
+    const savings = sumByCategoryType("savings");
+    const investments = sumByCategoryType("investments");
+
+    return {
+      openingBase,
+      income,
+      essentialExpenses,
+      discretionaryExpenses,
+      debtPayments,
+      savings,
+      investments,
+      closingBase: openingBase + netMonth,
+    };
+  }, [openingBalances, tableTransactions]);
+
+  const accountMonthlyBalances = useMemo(() => {
+    const byAccount = new Map<
+      string,
+      {
+        name: string;
+        currencyCode: string;
+        symbol: string;
+        opening: number;
+        closing: number;
+      }
+    >();
+
+    for (const opening of openingBalances ?? []) {
+      byAccount.set(opening.account_id, {
+        name: opening.account_name,
+        currencyCode: opening.account_currency,
+        symbol: opening.account_currency_symbol,
+        opening: opening.opening_amount,
+        closing: opening.opening_amount,
+      });
+    }
+
+    for (const tx of tableTransactions) {
+      for (const line of tx.amounts) {
+        const current = byAccount.get(line.account_id);
+        if (current) {
+          current.closing += line.amount;
+        } else {
+          byAccount.set(line.account_id, {
+            name: line.account_name,
+            currencyCode: line.original_currency,
+            symbol: line.account_currency_symbol,
+            opening: 0,
+            closing: line.amount,
+          });
+        }
+      }
+    }
+
+    return Array.from(byAccount.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [openingBalances, tableTransactions]);
 
   const columns = useMemo<ColumnDef<TransactionWithRelations>[]>(
     () => [
@@ -203,10 +331,14 @@ export function TransactionsTable() {
         accessorKey: "transaction_type",
         header: "Tipo",
         enableSorting: false,
+        filterFn: "equalsString",
         cell: ({ row }) => {
           const type = row.original.transaction_type;
           return (
-            <Badge variant="secondary" className={TYPE_BADGE_STYLES[type] ?? ""}>
+            <Badge
+              variant="secondary"
+              className={TYPE_BADGE_STYLES[type] ?? ""}
+            >
               {TRANSACTION_TYPE_LABELS[type]}
             </Badge>
           );
@@ -217,12 +349,14 @@ export function TransactionsTable() {
         id: "account_name",
         header: "Cuenta",
         enableSorting: false,
+        filterFn: "equalsString",
         cell: ({ row }) => getPrimaryLine(row.original)?.account_name ?? "—",
       },
       {
         accessorKey: "category_name",
         header: "Categoría",
         enableSorting: false,
+        filterFn: "equalsString",
         cell: ({ row }) => row.original.category_name ?? "—",
       },
       {
@@ -258,7 +392,7 @@ export function TransactionsTable() {
         enableSorting: true,
         cell: ({ row }) =>
           `${baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}${formatAmount(
-            Math.abs(getPrimaryLine(row.original)?.base_amount ?? 0)
+            Math.abs(getPrimaryLine(row.original)?.base_amount ?? 0),
           )}`,
       },
       {
@@ -269,7 +403,11 @@ export function TransactionsTable() {
           const tx = row.original;
           return (
             <div className="flex justify-end gap-1">
-              <Button variant="ghost" size="icon" onClick={() => handleEdit(tx)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleEdit(tx)}
+              >
                 <Pencil className="size-4" />
               </Button>
               <Button
@@ -284,16 +422,41 @@ export function TransactionsTable() {
         },
       },
     ],
-    [baseCurrencySymbol]
+    [baseCurrencySymbol],
   );
 
   const table = useReactTable({
     data: tableTransactions,
     columns,
-    state: { sorting },
+    state: { sorting, globalFilter, columnFilters, pagination },
     onSortingChange: setSorting,
+    onGlobalFilterChange: setGlobalFilter,
+    onColumnFiltersChange: setColumnFilters,
+    onPaginationChange: setPagination,
+    globalFilterFn: (row, _columnId, filterValue) => {
+      const query = String(filterValue ?? "")
+        .trim()
+        .toLowerCase();
+      if (!query) return true;
+      const tx = row.original;
+      const accountName =
+        (tx.transaction_type === "transfer"
+          ? tx.amounts.find((line) => line.amount < 0)?.account_name
+          : tx.amounts[0]?.account_name) ?? "";
+      const haystack = [
+        tx.description,
+        tx.category_name ?? "",
+        accountName,
+        TRANSACTION_TYPE_LABELS[tx.transaction_type],
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    },
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
   });
 
   const handleCreateTx = () => {
@@ -414,7 +577,11 @@ export function TransactionsTable() {
             <ArrowLeftRight className="mr-1 size-4" />
             Transferencia
           </Button>
-          <Button onClick={handleCreateTx} size="sm" disabled={!selectedMonthId}>
+          <Button
+            onClick={handleCreateTx}
+            size="sm"
+            disabled={!selectedMonthId}
+          >
             <Plus className="mr-1 size-4" />
             Nueva transacción
           </Button>
@@ -422,33 +589,144 @@ export function TransactionsTable() {
       </div>
 
       {selectedMonth && (
-        <div className="rounded-md border p-3">
-          <p className="text-sm font-medium">
-            Saldos Iniciales - {MONTHS[selectedMonth.month - 1]} {selectedMonth.year}
+        <p className="text-lg font-semibold">
+          {MONTHS[selectedMonth.month - 1]} {selectedMonth.year}
+        </p>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Saldo apertura</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p
+              className={`text-2xl font-semibold ${amountTone(monthSummary.openingBase)}`}
+            >
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(monthSummary.openingBase)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Ingresos</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className="text-2xl font-semibold text-green-600">
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(Math.abs(monthSummary.income))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Gastos Esenciales</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className="text-2xl font-semibold text-red-600">
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(Math.abs(monthSummary.essentialExpenses))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Gastos Discrecionales</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className="text-2xl font-semibold text-orange-600">
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(Math.abs(monthSummary.discretionaryExpenses))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Pago de Deudas</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className="text-2xl font-semibold text-rose-600">
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(Math.abs(monthSummary.debtPayments))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Ahorros</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className="text-2xl font-semibold text-cyan-600">
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(Math.abs(monthSummary.savings))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Inversiones</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className="text-2xl font-semibold text-indigo-600">
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(Math.abs(monthSummary.investments))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>Saldo cierre</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p
+              className={`text-2xl font-semibold ${amountTone(monthSummary.closingBase)}`}
+            >
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(monthSummary.closingBase)}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {selectedMonth && (
+        <div className="rounded-md border p-3 sm:p-4">
+          <p className="text-base font-semibold">
+            Saldos por cuenta - {MONTHS[selectedMonth.month - 1]}{" "}
+            {selectedMonth.year}
           </p>
-          <p className="text-muted-foreground mb-2 text-xs">
-            Arrastrados automáticamente desde el mes anterior.
+          <p className="text-muted-foreground mb-3 text-xs">
+            Inicio y cierre del mes seleccionado.
           </p>
-          {openingBalances && openingBalances.length > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {openingBalances.map((ob) => (
-                <Card key={ob.id} className="gap-0 overflow-hidden py-0">
-                  <CardHeader className="bg-muted/35 px-4 py-3">
-                    <CardTitle className="text-sm">{ob.account_name}</CardTitle>
-                    <CardDescription className="text-xs">
-                      {ob.account_currency}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-1 px-4 py-3">
-                    <p className={`text-base font-semibold ${amountTone(ob.opening_amount)}`}>
-                      {ob.account_currency_symbol} {formatAmount(ob.opening_amount)}
-                    </p>
-                    <p className="text-muted-foreground text-xs">
-                      Base: {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-                      {formatAmount(ob.opening_base_amount)}
-                    </p>
-                  </CardContent>
-                </Card>
+          {accountMonthlyBalances.length > 0 ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {accountMonthlyBalances.map((account) => (
+                <div
+                  key={account.name}
+                  className="bg-muted/20 space-y-2 rounded-md border px-3 py-2.5"
+                >
+                  <p className="text-foreground truncate text-sm font-semibold">
+                    {account.name} ({account.currencyCode})
+                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      Inicio del mes
+                    </span>
+                    <span
+                      className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.opening)}`}
+                    >
+                      {account.symbol} {formatAmount(account.opening)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Final del mes</span>
+                    <span
+                      className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.closing)}`}
+                    >
+                      {account.symbol} {formatAmount(account.closing)}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
           ) : (
@@ -458,6 +736,89 @@ export function TransactionsTable() {
           )}
         </div>
       )}
+
+      <div className="flex flex-wrap items-start justify-start gap-2">
+        <Input
+          className="w-full md:w-80"
+          placeholder="Buscar descripción/cuenta/categoría..."
+          value={globalFilter}
+          onChange={(event) => {
+            setGlobalFilter(event.target.value);
+            table.setPageIndex(0);
+          }}
+        />
+        <Select
+          value={
+            (table.getColumn("transaction_type")?.getFilterValue() as string) ??
+            "all"
+          }
+          onValueChange={(value) => {
+            table
+              .getColumn("transaction_type")
+              ?.setFilterValue(value === "all" ? undefined : value);
+            table.setPageIndex(0);
+          }}
+        >
+          <SelectTrigger className="w-full md:w-52">
+            <SelectValue placeholder="Tipo" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los tipos</SelectItem>
+            <SelectItem value="income">Ingreso</SelectItem>
+            <SelectItem value="expense">Gasto</SelectItem>
+            <SelectItem value="transfer">Transferencia</SelectItem>
+            <SelectItem value="correction">Corrección</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={
+            (table.getColumn("account_name")?.getFilterValue() as string) ??
+            "all"
+          }
+          onValueChange={(value) => {
+            table
+              .getColumn("account_name")
+              ?.setFilterValue(value === "all" ? undefined : value);
+            table.setPageIndex(0);
+          }}
+        >
+          <SelectTrigger className="w-full md:w-52">
+            <SelectValue placeholder="Cuenta" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las cuentas</SelectItem>
+            {accountFilterOptions.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={
+            (table.getColumn("category_name")?.getFilterValue() as string) ??
+            "all"
+          }
+          onValueChange={(value) => {
+            table
+              .getColumn("category_name")
+              ?.setFilterValue(value === "all" ? undefined : value);
+            table.setPageIndex(0);
+          }}
+        >
+          <SelectTrigger className="w-full md:w-52">
+            <SelectValue placeholder="Categoría" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las categorías</SelectItem>
+            {categoryFilterOptions.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="rounded-md border">
         <Table>
@@ -470,7 +831,7 @@ export function TransactionsTable() {
                       ? null
                       : flexRender(
                           header.column.columnDef.header,
-                          header.getContext()
+                          header.getContext(),
                         )}
                   </TableHead>
                 ))}
@@ -509,7 +870,7 @@ export function TransactionsTable() {
                     <TableCell key={cell.id}>
                       {flexRender(
                         cell.column.columnDef.cell,
-                        cell.getContext()
+                        cell.getContext(),
                       )}
                     </TableCell>
                   ))}
@@ -518,6 +879,47 @@ export function TransactionsTable() {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-muted-foreground text-sm">
+          {table.getFilteredRowModel().rows.length} resultado(s)
+        </p>
+        <div className="flex items-center gap-2">
+          <Select
+            value={String(table.getState().pagination.pageSize)}
+            onValueChange={(value) => table.setPageSize(Number(value))}
+          >
+            <SelectTrigger className="w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10 / pág</SelectItem>
+              <SelectItem value="20">20 / pág</SelectItem>
+              <SelectItem value="50">50 / pág</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+          >
+            Anterior
+          </Button>
+          <span className="text-sm">
+            Página {table.getState().pagination.pageIndex + 1} de{" "}
+            {Math.max(table.getPageCount(), 1)}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+          >
+            Siguiente
+          </Button>
+        </div>
       </div>
 
       <TransactionDialog
@@ -545,14 +947,16 @@ export function TransactionsTable() {
               {deletingTx?.transaction_type === "transfer" ? (
                 <>
                   ¿Estás seguro de que querés eliminar esta transferencia? Se
-                  eliminará la transacción y sus líneas asociadas. Esta acción no se
-                  puede deshacer.
+                  eliminará la transacción y sus líneas asociadas. Esta acción
+                  no se puede deshacer.
                 </>
               ) : (
                 <>
                   ¿Estás seguro de que querés eliminar la transacción{" "}
-                  <span className="font-semibold">{deletingTx?.description}</span>?
-                  Esta acción no se puede deshacer.
+                  <span className="font-semibold">
+                    {deletingTx?.description}
+                  </span>
+                  ? Esta acción no se puede deshacer.
                 </>
               )}
             </DialogDescription>
@@ -608,9 +1012,14 @@ export function TransactionsTable() {
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
                   {nextMonthPreview.balances.map((balance) => (
-                    <Card key={balance.account_id} className="gap-0 overflow-hidden py-0">
+                    <Card
+                      key={balance.account_id}
+                      className="gap-0 overflow-hidden py-0"
+                    >
                       <CardHeader className="bg-muted/35 px-4 py-3">
-                        <CardTitle className="text-sm">{balance.account_name}</CardTitle>
+                        <CardTitle className="text-sm">
+                          {balance.account_name}
+                        </CardTitle>
                         <CardDescription className="text-xs">
                           {balance.account_currency}
                         </CardDescription>
@@ -618,14 +1027,15 @@ export function TransactionsTable() {
                       <CardContent className="space-y-1 px-4 py-3">
                         <p
                           className={`text-base font-semibold ${amountTone(
-                            balance.opening_amount
+                            balance.opening_amount,
                           )}`}
                         >
                           {balance.account_currency_symbol}{" "}
                           {formatAmount(balance.opening_amount)}
                         </p>
                         <p className="text-muted-foreground text-xs">
-                          Base: {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+                          Base:{" "}
+                          {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
                           {formatAmount(balance.opening_base_amount)}
                         </p>
                       </CardContent>

@@ -464,6 +464,9 @@ export function TransferDialog({
                 onChange={(e) => handleDestinationAmountChange(e.target.value)}
                 disabled={isPending}
               />
+              <p className="text-muted-foreground text-xs">
+                Monto en la moneda de la cuenta destino.
+              </p>
               {errors.base_amount && (
                 <p className="text-destructive text-sm">
                   {errors.base_amount}
