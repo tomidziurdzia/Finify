@@ -18,3 +18,18 @@ export interface OpeningBalance {
   account_currency: string;
   account_currency_symbol: string;
 }
+
+export interface OpeningBalancePreview {
+  account_id: string;
+  account_name: string;
+  account_currency: string;
+  account_currency_symbol: string;
+  opening_amount: number;
+  opening_base_amount: number;
+}
+
+export interface NextMonthPreview {
+  year: number;
+  month: number;
+  balances: OpeningBalancePreview[];
+}

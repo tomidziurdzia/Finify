@@ -23,7 +23,6 @@ import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
 import {
   useCreateTransfer,
   useUpdateTransaction,
-  useBaseCurrency,
 } from "@/hooks/useTransactions";
 import { CreateTransferSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
@@ -53,14 +52,13 @@ export function TransferDialog({
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [exchangeRate, setExchangeRate] = useState("1");
-  const [baseAmount, setBaseAmount] = useState("");
+  const [destinationAmount, setDestinationAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [fetchingRate, setFetchingRate] = useState(false);
 
   const { data: accounts } = useAccounts();
   const { data: currencies } = useCurrencies();
-  const { data: baseCurrency } = useBaseCurrency();
   const createTransferMutation = useCreateTransfer();
   const updateMutation = useUpdateTransaction();
 
@@ -71,35 +69,39 @@ export function TransferDialog({
 
   const sourceAccount = activeAccounts.find((a) => a.id === sourceAccountId);
   const destAccount = activeAccounts.find((a) => a.id === destinationAccountId);
+  const destinationCurrency = destAccount?.currency ?? "";
 
   const filteredDestAccounts = activeAccounts.filter(
     (a) => a.id !== sourceAccountId
   );
 
-  // Track whether the user manually edited base_amount
-  const baseManuallyEdited = useRef(false);
+  // Track whether the user manually edited destination amount
+  const destinationManuallyEdited = useRef(false);
   // Keep a ref to amount for async FX callback
   const amountRef = useRef(amount);
   amountRef.current = amount;
 
-  // Auto-fetch exchange rate from Frankfurter when source account or date changes
+  // Auto-fetch exchange rate from source currency to destination currency
   useEffect(() => {
-    if (isEditing || !sourceAccount || !baseCurrency || !currencies) return;
+    if (isEditing || !sourceAccount || !destAccount || !currencies) return;
 
-    const accountCurrency = sourceAccount.currency;
-    if (accountCurrency === baseCurrency) {
+    const sourceCurrency = sourceAccount.currency;
+    const targetCurrency = destAccount.currency;
+    if (sourceCurrency === targetCurrency) {
       setExchangeRate("1");
+      const amt = parseNumberInput(amountRef.current);
+      if (!isNaN(amt) && amt > 0) {
+          setDestinationAmount(formatNumberInput(String(amt).replace(".", ",")));
+      }
       return;
     }
 
     // Check both currencies are fiat
-    const accountCurrencyInfo = currencies.find(
-      (c) => c.code === accountCurrency
-    );
-    const baseCurrencyInfo = currencies.find((c) => c.code === baseCurrency);
+    const sourceCurrencyInfo = currencies.find((c) => c.code === sourceCurrency);
+    const targetCurrencyInfo = currencies.find((c) => c.code === targetCurrency);
     if (
-      accountCurrencyInfo?.currency_type !== "fiat" ||
-      baseCurrencyInfo?.currency_type !== "fiat"
+      sourceCurrencyInfo?.currency_type !== "fiat" ||
+      targetCurrencyInfo?.currency_type !== "fiat"
     ) {
       return;
     }
@@ -107,18 +109,18 @@ export function TransferDialog({
     let cancelled = false;
     setFetchingRate(true);
 
-    fetchExchangeRate(accountCurrency, baseCurrency, date).then((rate) => {
+    fetchExchangeRate(sourceCurrency, targetCurrency, date).then((rate) => {
       if (cancelled) return;
       setFetchingRate(false);
       if (rate !== null) {
         const formattedRate = formatNumberInput(String(rate).replace(".", ","));
         setExchangeRate(formattedRate);
-        baseManuallyEdited.current = false;
+        destinationManuallyEdited.current = false;
         // Recalculate base if amount already entered
         const amt = parseNumberInput(amountRef.current);
         if (!isNaN(amt) && amt > 0) {
           const base = Math.round(amt * rate * 100) / 100;
-          setBaseAmount(formatNumberInput(String(base).replace(".", ",")));
+          setDestinationAmount(formatNumberInput(String(base).replace(".", ",")));
         }
       }
     });
@@ -126,7 +128,15 @@ export function TransferDialog({
     return () => {
       cancelled = true;
     };
-  }, [sourceAccountId, date, isEditing, sourceAccount, baseCurrency, currencies]);
+  }, [
+    sourceAccountId,
+    destinationAccountId,
+    date,
+    isEditing,
+    sourceAccount,
+    destAccount,
+    currencies,
+  ]);
 
   // Auto-generate description from account names
   useEffect(() => {
@@ -161,7 +171,7 @@ export function TransferDialog({
       setExchangeRate(
         formatNumberInput(String(sourceLine?.exchange_rate ?? 1).replace(".", ","))
       );
-      setBaseAmount(
+      setDestinationAmount(
         formatNumberInput(
           String(Math.abs(sourceLine?.base_amount ?? 0)).replace(".", ",")
         )
@@ -174,11 +184,11 @@ export function TransferDialog({
       setDescription("");
       setAmount("");
       setExchangeRate("1");
-      setBaseAmount("");
+      setDestinationAmount("");
       setNotes("");
     }
     setErrors({});
-    baseManuallyEdited.current = false;
+    destinationManuallyEdited.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transfer, open]);
 
@@ -186,19 +196,19 @@ export function TransferDialog({
     const formatted = formatNumberInput(val);
     setAmount(formatted);
     const amt = parseNumberInput(formatted);
-    if (baseManuallyEdited.current) {
-      // User set base manually → recalculate rate
-      const base = parseNumberInput(baseAmount);
+    if (destinationManuallyEdited.current) {
+      // User set destination manually → recalculate rate
+      const base = parseNumberInput(destinationAmount);
       if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
         const newRate = Math.round((base / amt) * 100000000) / 100000000;
         setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
       }
     } else {
-      // Base was auto-calculated → recalculate base from rate
+      // Destination was auto-calculated → recalculate from rate
       const rate = parseNumberInput(exchangeRate);
       if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
         const newBase = Math.round(amt * rate * 100) / 100;
-        setBaseAmount(formatNumberInput(String(newBase).replace(".", ",")));
+        setDestinationAmount(formatNumberInput(String(newBase).replace(".", ",")));
       }
     }
   };
@@ -206,19 +216,19 @@ export function TransferDialog({
   const handleRateChange = (val: string) => {
     const formatted = formatNumberInput(val);
     setExchangeRate(formatted);
-    baseManuallyEdited.current = false;
+    destinationManuallyEdited.current = false;
     const amt = parseNumberInput(amount);
     const rate = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
       const newBase = Math.round(amt * rate * 100) / 100;
-      setBaseAmount(formatNumberInput(String(newBase).replace(".", ",")));
+      setDestinationAmount(formatNumberInput(String(newBase).replace(".", ",")));
     }
   };
 
-  const handleBaseAmountChange = (val: string) => {
-    baseManuallyEdited.current = true;
+  const handleDestinationAmountChange = (val: string) => {
+    destinationManuallyEdited.current = true;
     const formatted = formatNumberInput(val);
-    setBaseAmount(formatted);
+    setDestinationAmount(formatted);
     const amt = parseNumberInput(amount);
     const base = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
@@ -233,7 +243,7 @@ export function TransferDialog({
 
     const amountNum = parseNumberInput(amount);
     const rateNum = parseNumberInput(exchangeRate);
-    const baseNum = parseNumberInput(baseAmount);
+    const destinationNum = parseNumberInput(destinationAmount);
 
     if (isEditing) {
       try {
@@ -246,13 +256,13 @@ export function TransferDialog({
               account_id: sourceAccountId,
               amount: -Math.abs(isNaN(amountNum) ? 0 : amountNum),
               exchange_rate: isNaN(rateNum) ? 1 : rateNum,
-              base_amount: -Math.abs(isNaN(baseNum) ? 0 : baseNum),
+              base_amount: -Math.abs(isNaN(destinationNum) ? 0 : destinationNum),
             },
             {
               account_id: destinationAccountId,
               amount: Math.abs(isNaN(amountNum) ? 0 : amountNum),
               exchange_rate: isNaN(rateNum) ? 1 : rateNum,
-              base_amount: Math.abs(isNaN(baseNum) ? 0 : baseNum),
+              base_amount: Math.abs(isNaN(destinationNum) ? 0 : destinationNum),
             },
           ],
           category_id: null,
@@ -273,7 +283,7 @@ export function TransferDialog({
       description,
       amount: isNaN(amountNum) ? 0 : amountNum,
       exchange_rate: isNaN(rateNum) ? 1 : rateNum,
-      base_amount: isNaN(baseNum) ? 0 : baseNum,
+      base_amount: isNaN(destinationNum) ? 0 : destinationNum,
       notes,
     };
 
@@ -443,15 +453,15 @@ export function TransferDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="tf-base">
-                Monto base{baseCurrency ? ` (${baseCurrency})` : ""}
+                Monto destino{destinationCurrency ? ` (${destinationCurrency})` : ""}
               </Label>
               <Input
                 id="tf-base"
                 type="text"
                 inputMode="decimal"
                 placeholder="0,00"
-                value={baseAmount}
-                onChange={(e) => handleBaseAmountChange(e.target.value)}
+                value={destinationAmount}
+                onChange={(e) => handleDestinationAmountChange(e.target.value)}
                 disabled={isPending}
               />
               {errors.base_amount && (
