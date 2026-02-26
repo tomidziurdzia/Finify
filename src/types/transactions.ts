@@ -17,23 +17,33 @@ export const TRANSACTION_TYPE_LABELS: Record<TransactionType, string> = {
 export interface Transaction {
   id: string;
   user_id: string;
-  account_id: string;
+  month_id: string | null;
   category_id: string | null;
   transaction_type: TransactionType;
   date: string;
   description: string;
-  amount: number;
-  original_currency: string;
-  exchange_rate: number;
-  base_amount: number;
-  transfer_linked_id: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface TransactionWithRelations extends Transaction {
+export interface TransactionAmount {
+  id: string;
+  transaction_id: string;
+  account_id: string;
+  amount: number;
+  original_currency: string;
+  exchange_rate: number;
+  base_amount: number;
+  created_at: string;
+}
+
+export interface TransactionAmountWithRelations extends TransactionAmount {
   account_name: string;
   account_currency_symbol: string;
+}
+
+export interface TransactionWithRelations extends Transaction {
   category_name: string | null;
+  amounts: TransactionAmountWithRelations[];
 }

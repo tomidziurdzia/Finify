@@ -39,6 +39,7 @@ import { Loader2 } from "lucide-react";
 
 interface TransactionDialogProps {
   transaction: TransactionWithRelations | null;
+  monthId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -51,6 +52,7 @@ const DIALOG_TRANSACTION_TYPES: TransactionType[] = [
 
 export function TransactionDialog({
   transaction,
+  monthId,
   open,
   onOpenChange,
 }: TransactionDialogProps) {
@@ -81,8 +83,7 @@ export function TransactionDialog({
 
   const selectedAccount = activeAccounts.find((a) => a.id === accountId);
 
-  const showCategory =
-    transactionType === "income" || transactionType === "expense";
+  const showCategory = transactionType !== "transfer";
 
   // Track whether the user manually edited base_amount
   const baseManuallyEdited = useRef(false);
@@ -139,14 +140,23 @@ export function TransactionDialog({
   // Sync form when transaction changes
   useEffect(() => {
     if (transaction) {
+      const line = transaction.amounts[0];
       setDate(transaction.date);
       setTransactionType(transaction.transaction_type);
-      setAccountId(transaction.account_id);
+      setAccountId(line?.account_id ?? "");
       setCategoryId(transaction.category_id ?? "");
       setDescription(transaction.description);
-      setAmount(formatNumberInput(String(transaction.amount).replace(".", ",")));
-      setExchangeRate(formatNumberInput(String(transaction.exchange_rate).replace(".", ",")));
-      setBaseAmount(formatNumberInput(String(transaction.base_amount).replace(".", ",")));
+      setAmount(
+        formatNumberInput(String(Math.abs(line?.amount ?? 0)).replace(".", ","))
+      );
+      setExchangeRate(
+        formatNumberInput(String(line?.exchange_rate ?? 1).replace(".", ","))
+      );
+      setBaseAmount(
+        formatNumberInput(
+          String(Math.abs(line?.base_amount ?? 0)).replace(".", ",")
+        )
+      );
       setNotes(transaction.notes ?? "");
     } else {
       setDate(format(new Date(), "yyyy-MM-dd"));
@@ -218,14 +228,19 @@ export function TransactionDialog({
     const baseNum = parseNumberInput(baseAmount);
 
     const formData = {
+      month_id: monthId,
       date,
       transaction_type: transactionType,
-      account_id: accountId,
       category_id: showCategory ? categoryId || null : null,
       description,
-      amount: isNaN(amountNum) ? 0 : amountNum,
-      exchange_rate: isNaN(rateNum) ? 1 : rateNum,
-      base_amount: isNaN(baseNum) ? 0 : baseNum,
+      amounts: [
+        {
+          account_id: accountId,
+          amount: isNaN(amountNum) ? 0 : amountNum,
+          exchange_rate: isNaN(rateNum) ? 1 : rateNum,
+          base_amount: isNaN(baseNum) ? 0 : baseNum,
+        },
+      ],
       notes,
     };
 
@@ -233,8 +248,16 @@ export function TransactionDialog({
     if (!parsed.success) {
       const fieldErrors: Record<string, string> = {};
       for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (field && typeof field === "string") {
+        const first = issue.path[0];
+        if (first === "amounts") {
+          const lineField = issue.path[2];
+          if (typeof lineField === "string") {
+            fieldErrors[lineField] = issue.message;
+          }
+          continue;
+        }
+        if (first && typeof first === "string") {
+          const field = first;
           fieldErrors[field] = issue.message;
         }
       }
@@ -246,7 +269,21 @@ export function TransactionDialog({
       if (isEditing) {
         await updateMutation.mutateAsync({
           id: transaction.id,
-          ...parsed.data,
+          date: parsed.data.date,
+          category_id: parsed.data.category_id,
+          description: parsed.data.description,
+          notes: parsed.data.notes,
+          amounts: parsed.data.amounts.map((line) => {
+            if (transaction.transaction_type === "income") return line;
+            if (transaction.transaction_type === "expense") {
+              return {
+                ...line,
+                amount: -Math.abs(line.amount),
+                base_amount: -Math.abs(line.base_amount),
+              };
+            }
+            return line;
+          }),
         });
       } else {
         await createMutation.mutateAsync(parsed.data);

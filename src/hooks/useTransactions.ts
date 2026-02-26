@@ -14,8 +14,7 @@ import { toast } from "sonner";
 
 const TRANSACTION_KEYS = {
   all: ["transactions"] as const,
-  list: (year: number, month: number) =>
-    ["transactions", year, month] as const,
+  list: (monthId: string) => ["transactions", monthId] as const,
 };
 
 export function useBaseCurrency() {
@@ -30,14 +29,18 @@ export function useBaseCurrency() {
   });
 }
 
-export function useTransactions(year: number, month: number) {
+export function useTransactions(monthId: string | null) {
   return useQuery({
-    queryKey: TRANSACTION_KEYS.list(year, month),
+    queryKey: TRANSACTION_KEYS.list(monthId ?? ""),
+    enabled: !!monthId,
     queryFn: async () => {
-      const result = await getTransactions(year, month);
+      if (!monthId) return [];
+      const result = await getTransactions(monthId);
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 }
 
