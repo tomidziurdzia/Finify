@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getTransactions,
+  getBaseCurrency,
   createTransaction,
   createTransfer,
   updateTransaction,
@@ -16,6 +17,18 @@ const TRANSACTION_KEYS = {
   list: (year: number, month: number) =>
     ["transactions", year, month] as const,
 };
+
+export function useBaseCurrency() {
+  return useQuery({
+    queryKey: ["baseCurrency"],
+    queryFn: async () => {
+      const result = await getBaseCurrency();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: Infinity,
+  });
+}
 
 export function useTransactions(year: number, month: number) {
   return useQuery({

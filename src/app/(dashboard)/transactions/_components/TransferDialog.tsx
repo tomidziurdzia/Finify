@@ -19,15 +19,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAccounts } from "@/hooks/useAccounts";
+import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
 import {
   useCreateTransfer,
   useUpdateTransaction,
+  useBaseCurrency,
 } from "@/hooks/useTransactions";
 import { CreateTransferSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
+import { fetchExchangeRate } from "@/lib/frankfurter";
 import type { TransactionWithRelations } from "@/types/transactions";
 import { format } from "date-fns";
+import { Loader2 } from "lucide-react";
 
 interface TransferDialogProps {
   transfer: TransactionWithRelations | null;
@@ -51,11 +54,11 @@ export function TransferDialog({
   const [baseAmount, setBaseAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [lastEdited, setLastEdited] = useState<"amount" | "rate" | "base">(
-    "amount"
-  );
+  const [fetchingRate, setFetchingRate] = useState(false);
 
   const { data: accounts } = useAccounts();
+  const { data: currencies } = useCurrencies();
+  const { data: baseCurrency } = useBaseCurrency();
   const createTransferMutation = useCreateTransfer();
   const updateMutation = useUpdateTransaction();
 
@@ -71,38 +74,57 @@ export function TransferDialog({
     (a) => a.id !== sourceAccountId
   );
 
-  const skipEffect = useRef(false);
+  // Track whether the user manually edited base_amount
+  const baseManuallyEdited = useRef(false);
+  // Keep a ref to amount for async FX callback
+  const amountRef = useRef(amount);
+  amountRef.current = amount;
 
-  // Auto-calculate: when amount or rate changes → update base_amount
+  // Auto-fetch exchange rate from Frankfurter when source account or date changes
   useEffect(() => {
-    if (skipEffect.current) {
-      skipEffect.current = false;
+    if (isEditing || !sourceAccount || !baseCurrency || !currencies) return;
+
+    const accountCurrency = sourceAccount.currency;
+    if (accountCurrency === baseCurrency) {
+      setExchangeRate("1");
       return;
     }
-    const amt = parseNumberInput(amount);
-    const rate = parseNumberInput(exchangeRate);
 
-    if (lastEdited !== "base" && !isNaN(amt) && !isNaN(rate) && rate > 0) {
-      skipEffect.current = true;
-      setBaseAmount(formatNumberInput(String(Math.round(amt * rate * 100) / 100).replace(".", ",")));
-    }
-  }, [amount, exchangeRate, lastEdited]);
-
-  // When base_amount changes manually → update exchange_rate
-  useEffect(() => {
-    if (skipEffect.current) {
-      skipEffect.current = false;
+    // Check both currencies are fiat
+    const accountCurrencyInfo = currencies.find(
+      (c) => c.code === accountCurrency
+    );
+    const baseCurrencyInfo = currencies.find((c) => c.code === baseCurrency);
+    if (
+      accountCurrencyInfo?.currency_type !== "fiat" ||
+      baseCurrencyInfo?.currency_type !== "fiat"
+    ) {
       return;
     }
-    const amt = parseNumberInput(amount);
-    const base = parseNumberInput(baseAmount);
 
-    if (lastEdited === "base" && !isNaN(amt) && amt > 0 && !isNaN(base)) {
-      skipEffect.current = true;
-      const rate = Math.round((base / amt) * 100000000) / 100000000;
-      setExchangeRate(formatNumberInput(String(rate).replace(".", ",")));
-    }
-  }, [baseAmount, amount, lastEdited]);
+    let cancelled = false;
+    setFetchingRate(true);
+
+    fetchExchangeRate(accountCurrency, baseCurrency, date).then((rate) => {
+      if (cancelled) return;
+      setFetchingRate(false);
+      if (rate !== null) {
+        const formattedRate = formatNumberInput(String(rate).replace(".", ","));
+        setExchangeRate(formattedRate);
+        baseManuallyEdited.current = false;
+        // Recalculate base if amount already entered
+        const amt = parseNumberInput(amountRef.current);
+        if (!isNaN(amt) && amt > 0) {
+          const base = Math.round(amt * rate * 100) / 100;
+          setBaseAmount(formatNumberInput(String(base).replace(".", ",")));
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceAccountId, date, isEditing, sourceAccount, baseCurrency, currencies]);
 
   // Auto-generate description from account names
   useEffect(() => {
@@ -139,23 +161,53 @@ export function TransferDialog({
       setNotes("");
     }
     setErrors({});
-    setLastEdited("amount");
+    baseManuallyEdited.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transfer, open]);
 
   const handleAmountChange = (val: string) => {
-    setLastEdited("amount");
-    setAmount(formatNumberInput(val));
+    const formatted = formatNumberInput(val);
+    setAmount(formatted);
+    const amt = parseNumberInput(formatted);
+    if (baseManuallyEdited.current) {
+      // User set base manually → recalculate rate
+      const base = parseNumberInput(baseAmount);
+      if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
+        const newRate = Math.round((base / amt) * 100000000) / 100000000;
+        setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
+      }
+    } else {
+      // Base was auto-calculated → recalculate base from rate
+      const rate = parseNumberInput(exchangeRate);
+      if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
+        const newBase = Math.round(amt * rate * 100) / 100;
+        setBaseAmount(formatNumberInput(String(newBase).replace(".", ",")));
+      }
+    }
   };
 
   const handleRateChange = (val: string) => {
-    setLastEdited("rate");
-    setExchangeRate(formatNumberInput(val));
+    const formatted = formatNumberInput(val);
+    setExchangeRate(formatted);
+    baseManuallyEdited.current = false;
+    const amt = parseNumberInput(amount);
+    const rate = parseNumberInput(formatted);
+    if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
+      const newBase = Math.round(amt * rate * 100) / 100;
+      setBaseAmount(formatNumberInput(String(newBase).replace(".", ",")));
+    }
   };
 
   const handleBaseAmountChange = (val: string) => {
-    setLastEdited("base");
-    setBaseAmount(formatNumberInput(val));
+    baseManuallyEdited.current = true;
+    const formatted = formatNumberInput(val);
+    setBaseAmount(formatted);
+    const amt = parseNumberInput(amount);
+    const base = parseNumberInput(formatted);
+    if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
+      const newRate = Math.round((base / amt) * 100000000) / 100000000;
+      setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -339,7 +391,12 @@ export function TransferDialog({
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tf-rate">Tipo de cambio</Label>
+              <Label htmlFor="tf-rate">
+                Tipo de cambio
+                {fetchingRate && (
+                  <Loader2 className="ml-1 inline size-3 animate-spin" />
+                )}
+              </Label>
               <Input
                 id="tf-rate"
                 type="text"
@@ -356,7 +413,9 @@ export function TransferDialog({
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tf-base">Monto base</Label>
+              <Label htmlFor="tf-base">
+                Monto base{baseCurrency ? ` (${baseCurrency})` : ""}
+              </Label>
               <Input
                 id="tf-base"
                 type="text"
