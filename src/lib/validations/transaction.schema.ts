@@ -17,7 +17,7 @@ const TransactionAmountLineSchema = z.object({
 
 export const CreateTransactionSchema = z
   .object({
-    month_id: z.string().uuid("Mes no válido"),
+    // month_id is resolved from `date` in the server action — not needed here
     date: z.string().min(1, "La fecha es obligatoria"),
     transaction_type: z.enum(TRANSACTION_TYPES, {
       error: "Tipo de transacción no válido",
@@ -69,7 +69,7 @@ export const CreateTransactionSchema = z
 
 export const CreateTransferSchema = z
   .object({
-    month_id: z.string().uuid("Mes no válido"),
+    // month_id is resolved from `date` in the server action — not needed here
     date: z.string().min(1, "La fecha es obligatoria"),
     source_account_id: z.string().uuid("Cuenta origen no válida"),
     destination_account_id: z.string().uuid("Cuenta destino no válida"),

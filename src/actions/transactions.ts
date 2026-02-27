@@ -62,7 +62,8 @@ export async function getBaseCurrency(): Promise<ActionResult<string>> {
       .single();
 
     return { data: data?.base_currency ?? "USD" };
-  } catch {
+  } catch (e) {
+    console.error("getBaseCurrency:", e);
     return { error: "Error al obtener la moneda base" };
   }
 }
@@ -137,7 +138,8 @@ export async function getTransactions(
     })) as TransactionWithRelations[];
 
     return { data: mapped };
-  } catch {
+  } catch (e) {
+    console.error("getTransactions:", e);
     return { error: "Error al obtener las transacciones" };
   }
 }
@@ -232,7 +234,11 @@ export async function createTransaction(
       .insert(rows);
 
     if (lineError) {
-      await supabase.from("transactions").delete().eq("id", transaction.id);
+      try {
+        await supabase.from("transactions").delete().eq("id", transaction.id);
+      } catch (cleanupErr) {
+        console.error("Cleanup failed after transaction line insert error:", cleanupErr);
+      }
       if (lineError.code === "23503") {
         return { error: "Cuenta no encontrada" };
       }
@@ -240,7 +246,8 @@ export async function createTransaction(
     }
 
     return { data: transaction as Transaction };
-  } catch {
+  } catch (e) {
+    console.error("createTransaction:", e);
     return { error: "Error al crear la transacción" };
   }
 }
@@ -265,13 +272,13 @@ export async function createTransfer(
     const resolvedMonth = await resolveMonthIdFromDate(parsed.data.date);
     if ("error" in resolvedMonth) return { error: resolvedMonth.error };
 
-    // Lookup both accounts and currencies
+    // Lookup both accounts and currencies (maybeSingle avoids throwing on 0 rows)
     const { data: sourceAccount } = await supabase
       .from("accounts")
       .select("id, currency")
       .eq("id", parsed.data.source_account_id)
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
     if (!sourceAccount) return { error: "Cuenta origen no encontrada" };
 
@@ -280,7 +287,7 @@ export async function createTransfer(
       .select("id, currency")
       .eq("id", parsed.data.destination_account_id)
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
     if (!destAccount) return { error: "Cuenta destino no encontrada" };
 
@@ -332,12 +339,17 @@ export async function createTransfer(
       .insert(rows);
 
     if (lineError) {
-      await supabase.from("transactions").delete().eq("id", transaction.id);
+      try {
+        await supabase.from("transactions").delete().eq("id", transaction.id);
+      } catch (cleanupErr) {
+        console.error("Cleanup failed after transfer line insert error:", cleanupErr);
+      }
       return { error: lineError.message };
     }
 
     return { data: transaction as Transaction };
-  } catch {
+  } catch (e) {
+    console.error("createTransfer:", e);
     return { error: "Error al crear la transferencia" };
   }
 }
@@ -532,7 +544,8 @@ export async function updateTransaction(
     }
 
     return { data: updatedTransaction as Transaction };
-  } catch {
+  } catch (e) {
+    console.error("updateTransaction:", e);
     return { error: "Error al actualizar la transacción" };
   }
 }
@@ -557,7 +570,8 @@ export async function deleteTransaction(
     if (error) return { error: error.message };
 
     return { data: null };
-  } catch {
+  } catch (e) {
+    console.error("deleteTransaction:", e);
     return { error: "Error al eliminar la transacción" };
   }
 }

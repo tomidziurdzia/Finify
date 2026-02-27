@@ -228,7 +228,6 @@ export function TransactionDialog({
     const baseNum = parseNumberInput(baseAmount);
 
     const formData = {
-      month_id: monthId,
       date,
       transaction_type: transactionType,
       category_id: showCategory ? categoryId || null : null,
