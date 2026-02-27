@@ -271,13 +271,22 @@ export function TransactionsTable() {
         },
       },
       {
-        accessorFn: (row) => Math.abs(getPrimaryLine(row)?.base_amount ?? 0),
+        accessorFn: (row) =>
+          Math.abs(
+            getPrimaryLine(row)?.current_base_amount ??
+              getPrimaryLine(row)?.base_amount ??
+              0,
+          ),
         id: "base_amount",
         header: "Monto Base",
         enableSorting: true,
         cell: ({ row }) =>
           `${baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}${formatAmount(
-            Math.abs(getPrimaryLine(row.original)?.base_amount ?? 0),
+            Math.abs(
+              getPrimaryLine(row.original)?.current_base_amount ??
+                getPrimaryLine(row.original)?.base_amount ??
+                0,
+            ),
           )}`,
       },
       {
@@ -921,7 +930,10 @@ export function TransactionsTable() {
                         <p className="text-muted-foreground text-xs">
                           Base:{" "}
                           {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-                          {formatAmount(balance.opening_base_amount)}
+                          {formatAmount(
+                            balance.current_opening_base_amount ??
+                              balance.opening_base_amount,
+                          )}
                         </p>
                       </CardContent>
                     </Card>

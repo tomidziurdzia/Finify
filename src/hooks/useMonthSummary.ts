@@ -38,10 +38,19 @@ export function useMonthSummary(
   const txs = transactions ?? [];
 
   const monthSummary = useMemo<MonthSummary>(() => {
-    const openingBase = (openingBalances ?? []).reduce(
-      (acc, b) => acc + b.opening_base_amount,
-      0,
-    );
+    const openingBase = (openingBalances ?? []).reduce((acc, b) => {
+      const value =
+        b.current_opening_base_amount ?? b.opening_base_amount ?? 0;
+      return acc + value;
+    }, 0);
+
+    const getPrimaryBase = (tx: TransactionWithRelations): number => {
+      const line = getPrimaryLine(tx);
+      if (!line) return 0;
+      // Preferimos el monto convertido dinámicamente a la moneda base actual;
+      // si no está disponible, caemos al base_amount persistido.
+      return line.current_base_amount ?? line.base_amount ?? 0;
+    };
 
     const sumByCategoryType = (
       categoryType: TransactionWithRelations["category_type"],
@@ -49,17 +58,17 @@ export function useMonthSummary(
       txs.reduce((acc, tx) => {
         if (tx.transaction_type === "transfer") return acc;
         if (tx.category_type !== categoryType) return acc;
-        return acc + Math.abs(getPrimaryLine(tx)?.base_amount ?? 0);
+        return acc + Math.abs(getPrimaryBase(tx));
       }, 0);
 
     const netMonth = txs.reduce((acc, tx) => {
       if (tx.transaction_type === "transfer") return acc;
-      return acc + (getPrimaryLine(tx)?.base_amount ?? 0);
+      return acc + getPrimaryBase(tx);
     }, 0);
 
     const income = txs.reduce((acc, tx) => {
       if (tx.transaction_type !== "income") return acc;
-      return acc + Math.abs(getPrimaryLine(tx)?.base_amount ?? 0);
+      return acc + Math.abs(getPrimaryBase(tx));
     }, 0);
 
     const essentialExpenses = sumByCategoryType("essential_expenses");

@@ -43,6 +43,10 @@ export interface TransactionAmount {
 export interface TransactionAmountWithRelations extends TransactionAmount {
   account_name: string;
   account_currency_symbol: string;
+
+  // Monto convertido dinámicamente a la moneda base actual usando FX histórico.
+  // Cuando no se calcule, los consumidores pueden hacer fallback a base_amount.
+  current_base_amount?: number;
 }
 
 export interface TransactionWithRelations extends Transaction {
