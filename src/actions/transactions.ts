@@ -11,7 +11,7 @@ import type {
   TransactionWithRelations,
   TransactionAmountWithRelations,
 } from "@/types/transactions";
-import { createMonth } from "@/actions/months";
+import { createMonth, getMonthsInRange } from "@/actions/months";
 
 type ActionResult<T> = { data: T } | { error: string };
 
@@ -140,6 +140,91 @@ export async function getTransactions(
     return { data: mapped };
   } catch (e) {
     console.error("getTransactions:", e);
+    return { error: "Error al obtener las transacciones" };
+  }
+}
+
+export async function getTransactionsForRange(
+  startMonthId: string,
+  endMonthId: string
+): Promise<ActionResult<TransactionWithRelations[]>> {
+  const monthsResult = await getMonthsInRange(startMonthId, endMonthId);
+  if ("error" in monthsResult) return monthsResult;
+  const monthIds = monthsResult.data.map((m) => m.id);
+  if (monthIds.length === 0) return { data: [] };
+
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "No autenticado" };
+
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        *,
+        budget_categories ( name, category_type ),
+        transaction_amounts (
+          id,
+          transaction_id,
+          account_id,
+          amount,
+          original_currency,
+          exchange_rate,
+          base_amount,
+          created_at,
+          accounts ( name, currency ),
+          currencies!original_currency ( symbol )
+        )
+      `
+      )
+      .eq("user_id", user.id)
+      .in("month_id", monthIds)
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) return { error: error.message };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mapped = (data ?? []).map((row: any) => {
+      const cat = row.budget_categories;
+      const category = Array.isArray(cat) ? cat[0] : cat;
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        month_id: row.month_id,
+        category_id: row.category_id,
+        transaction_type: row.transaction_type,
+        date: row.date,
+        description: row.description,
+        notes: row.notes,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        category_name: category?.name ?? null,
+        category_type: category?.category_type ?? null,
+        amounts: (row.transaction_amounts ?? []).map(
+          (line: any): TransactionAmountWithRelations => ({
+            id: line.id,
+            transaction_id: line.transaction_id,
+            account_id: line.account_id,
+            amount: Number(line.amount),
+            original_currency: line.original_currency,
+            exchange_rate: Number(line.exchange_rate),
+            base_amount: Number(line.base_amount),
+            created_at: line.created_at,
+            account_name: line.accounts?.name ?? "",
+            account_currency_symbol:
+              line.currencies?.symbol ?? line.original_currency,
+          })
+        ),
+      };
+    }) as TransactionWithRelations[];
+
+    return { data: mapped };
+  } catch (e) {
+    console.error("getTransactionsForRange:", e);
     return { error: "Error al obtener las transacciones" };
   }
 }

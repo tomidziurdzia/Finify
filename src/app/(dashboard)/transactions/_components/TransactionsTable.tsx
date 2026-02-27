@@ -76,6 +76,7 @@ import { TransferDialog } from "./TransferDialog";
 import { parseISO, format } from "date-fns";
 import type { NextMonthPreview } from "@/types/months";
 import { MONTH_NAMES, formatAmount, amountTone } from "@/lib/format";
+import { useMonthSummary, getPrimaryLine } from "@/hooks/useMonthSummary";
 
 const TYPE_BADGE_STYLES: Record<string, string> = {
   income: "bg-green-100 text-green-800 hover:bg-green-100",
@@ -164,6 +165,11 @@ export function TransactionsTable() {
 
   const tableTransactions = useMemo(() => transactions ?? [], [transactions]);
 
+  const { monthSummary, accountMonthlyBalances } = useMonthSummary(
+    transactions,
+    openingBalances,
+  );
+
   const accountFilterOptions = useMemo(() => {
     const values = new Set<string>();
     for (const tx of tableTransactions) {
@@ -183,100 +189,6 @@ export function TransactionsTable() {
     }
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [tableTransactions]);
-
-  const getPrimaryLine = (tx: TransactionWithRelations) => {
-    if (tx.amounts.length === 0) return null;
-    if (tx.transaction_type === "transfer") {
-      return tx.amounts.find((line) => line.amount < 0) ?? tx.amounts[0];
-    }
-    return tx.amounts[0];
-  };
-
-  const monthSummary = useMemo(() => {
-    const openingBase = (openingBalances ?? []).reduce(
-      (acc, balance) => acc + balance.opening_base_amount,
-      0,
-    );
-    const sumByCategoryType = (
-      categoryType: TransactionWithRelations["category_type"],
-    ) =>
-      tableTransactions.reduce((acc, tx) => {
-        if (tx.transaction_type === "transfer") return acc;
-        if (tx.category_type !== categoryType) return acc;
-        return acc + Math.abs(getPrimaryLine(tx)?.base_amount ?? 0);
-      }, 0);
-
-    const netMonth = tableTransactions.reduce((acc, tx) => {
-      if (tx.transaction_type === "transfer") return acc;
-      return acc + (getPrimaryLine(tx)?.base_amount ?? 0);
-    }, 0);
-
-    const income = tableTransactions.reduce((acc, tx) => {
-      if (tx.transaction_type !== "income") return acc;
-      return acc + Math.abs(getPrimaryLine(tx)?.base_amount ?? 0);
-    }, 0);
-
-    const essentialExpenses = sumByCategoryType("essential_expenses");
-    const discretionaryExpenses = sumByCategoryType("discretionary_expenses");
-    const debtPayments = sumByCategoryType("debt_payments");
-    const savings = sumByCategoryType("savings");
-    const investments = sumByCategoryType("investments");
-
-    return {
-      openingBase,
-      income,
-      essentialExpenses,
-      discretionaryExpenses,
-      debtPayments,
-      savings,
-      investments,
-      closingBase: openingBase + netMonth,
-    };
-  }, [openingBalances, tableTransactions]);
-
-  const accountMonthlyBalances = useMemo(() => {
-    const byAccount = new Map<
-      string,
-      {
-        name: string;
-        currencyCode: string;
-        symbol: string;
-        opening: number;
-        closing: number;
-      }
-    >();
-
-    for (const opening of openingBalances ?? []) {
-      byAccount.set(opening.account_id, {
-        name: opening.account_name,
-        currencyCode: opening.account_currency,
-        symbol: opening.account_currency_symbol,
-        opening: opening.opening_amount,
-        closing: opening.opening_amount,
-      });
-    }
-
-    for (const tx of tableTransactions) {
-      for (const line of tx.amounts) {
-        const current = byAccount.get(line.account_id);
-        if (current) {
-          current.closing += line.amount;
-        } else {
-          byAccount.set(line.account_id, {
-            name: line.account_name,
-            currencyCode: line.original_currency,
-            symbol: line.account_currency_symbol,
-            opening: 0,
-            closing: line.amount,
-          });
-        }
-      }
-    }
-
-    return Array.from(byAccount.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
-  }, [openingBalances, tableTransactions]);
 
   const columns = useMemo<ColumnDef<TransactionWithRelations>[]>(
     () => [

@@ -318,6 +318,57 @@ export async function createMonth(
   }
 }
 
+export async function getMonthsInRange(
+  startMonthId: string,
+  endMonthId: string
+): Promise<ActionResult<Month[]>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+    const { data: startRow, error: startErr } = await supabase
+      .from("months")
+      .select("year, month")
+      .eq("id", startMonthId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (startErr) return { error: startErr.message };
+    if (!startRow) return { error: "Mes inicial no encontrado" };
+
+    const { data: endRow, error: endErr } = await supabase
+      .from("months")
+      .select("year, month")
+      .eq("id", endMonthId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (endErr) return { error: endErr.message };
+    if (!endRow) return { error: "Mes final no encontrado" };
+
+    const startCode = toYearMonthCode(startRow.year, startRow.month);
+    const endCode = toYearMonthCode(endRow.year, endRow.month);
+    if (startCode > endCode) return { error: "El mes inicial debe ser anterior al final" };
+
+    const { data, error } = await supabase
+      .from("months")
+      .select("*")
+      .eq("user_id", userId)
+      .order("year", { ascending: true })
+      .order("month", { ascending: true });
+
+    if (error) return { error: error.message };
+
+    const filtered = (data ?? []).filter((m) => {
+      const code = toYearMonthCode(m.year, m.month);
+      return code >= startCode && code <= endCode;
+    });
+
+    return { data: filtered as Month[] };
+  } catch {
+    return { error: "Error al obtener meses del rango" };
+  }
+}
+
 export async function getOpeningBalances(
   monthId: string
 ): Promise<ActionResult<OpeningBalance[]>> {

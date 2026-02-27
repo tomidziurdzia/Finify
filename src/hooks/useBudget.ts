@@ -2,45 +2,33 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  applyBudgetLineToCalendarMonths,
-  applyBudgetLineToMonths,
-  applyBudgetLineToSelectedMonths,
   createBudgetNextMonthFromSource,
   createBudgetLine,
   getBudgetYears,
   getBudgetLines,
-  getBudgetRecurrenceRules,
   getBudgetSummaryVsActual,
+  getBudgetSummaryVsActualForRange,
   getOrCreateBudgetYear,
   ensureBudgetSeed,
   getBudgetCategories,
-  materializeBudgetRecurrenceForRange,
   upsertBudgetMonthPlan,
   updateBudgetLine,
   deleteBudgetLine,
   createCategory,
-  createOrUpdateBudgetRecurrenceRule,
-  deleteBudgetRecurrenceRule,
   updateCategory,
   deleteCategory,
 } from "@/actions/budget";
 import type {
   BudgetCategory,
   BudgetLineWithPlan,
-  BudgetRecurrenceRuleWithLine,
   BudgetSummaryVsActual,
   BudgetYear,
 } from "@/types/budget";
 import type {
-  ApplyBudgetLineToCalendarMonthsInput,
-  ApplyBudgetLineToMonthsInput,
-  ApplyBudgetLineToSelectedMonthsInput,
   CreateBudgetNextMonthFromSourceInput,
   CreateBudgetLineInput,
   CreateBudgetYearInput,
   CreateCategoryInput,
-  CreateOrUpdateBudgetRecurrenceRuleInput,
-  MaterializeBudgetRecurrenceInput,
   UpsertBudgetMonthPlanInput,
   UpdateBudgetLineInput,
   UpdateCategoryInput,
@@ -51,8 +39,6 @@ const BUDGET_KEYS = {
   years: ["budget", "years"] as const,
   categories: ["budget", "categories"] as const,
   lines: (monthId: string) => ["budget", "lines", monthId] as const,
-  recurrence: (lineId?: string) =>
-    ["budget", "recurrence", lineId ?? "all"] as const,
   summary: (monthId: string) => ["budget", "summary", monthId] as const,
 };
 
@@ -223,7 +209,6 @@ export function useDeleteBudgetLine(monthId: string | null) {
         queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
         queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
       }
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.recurrence() });
       toast.success("Línea eliminada");
     },
     onError: (err: Error) => toast.error(err.message),
@@ -248,75 +233,6 @@ export function useUpsertBudgetMonthPlan(monthId: string | null) {
         queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
       }
       toast.success("Plan mensual actualizado");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
-export function useApplyBudgetLineToMonths(monthId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: ApplyBudgetLineToMonthsInput) => {
-      const result = await applyBudgetLineToMonths(input);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-    onSuccess: (data) => {
-      for (const id of data.month_ids) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(id) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(id) });
-      }
-      if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
-      }
-      toast.success(`Aplicado en ${data.affected} mes(es)`);
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
-export function useApplyBudgetLineToSelectedMonths(monthId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: ApplyBudgetLineToSelectedMonthsInput) => {
-      const result = await applyBudgetLineToSelectedMonths(input);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-    onSuccess: (data) => {
-      for (const id of data.month_ids) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(id) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(id) });
-      }
-      if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
-      }
-      toast.success(`Aplicado en ${data.affected} mes(es)`);
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
-export function useApplyBudgetLineToCalendarMonths(monthId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: ApplyBudgetLineToCalendarMonthsInput) => {
-      const result = await applyBudgetLineToCalendarMonths(input);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-    onSuccess: (data) => {
-      for (const id of data.month_ids) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(id) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(id) });
-      }
-      if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
-      }
-      toast.success(`Aplicado en ${data.affected} mes(es)`);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -350,79 +266,6 @@ export function useCreateBudgetNextMonthFromSource(monthId: string | null) {
   });
 }
 
-export function useBudgetRecurrenceRules(lineId?: string) {
-  return useQuery<BudgetRecurrenceRuleWithLine[]>({
-    queryKey: BUDGET_KEYS.recurrence(lineId),
-    queryFn: async () => {
-      const result = await getBudgetRecurrenceRules(lineId);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-  });
-}
-
-export function useCreateOrUpdateBudgetRecurrenceRule(monthId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: CreateOrUpdateBudgetRecurrenceRuleInput) => {
-      const result = await createOrUpdateBudgetRecurrenceRule(input);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-    onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({
-        queryKey: BUDGET_KEYS.recurrence(vars.line_id),
-      });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.recurrence() });
-      if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
-      }
-      toast.success("Regla recurrente guardada");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
-export function useDeleteBudgetRecurrenceRule() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const result = await deleteBudgetRecurrenceRule(id);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.recurrence() });
-      toast.success("Regla recurrente eliminada");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
-export function useMaterializeBudgetRecurrence(monthId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: MaterializeBudgetRecurrenceInput) => {
-      const result = await materializeBudgetRecurrenceForRange(input);
-      if ("error" in result) throw new Error(result.error);
-      return result.data;
-    },
-    onSuccess: (data) => {
-      for (const id of data.month_ids) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(id) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(id) });
-      }
-      if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
-      }
-      toast.success("Reglas materializadas");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-}
-
 export function useBudgetSummary(monthId: string | null) {
   return useQuery<BudgetSummaryVsActual>({
     queryKey: BUDGET_KEYS.summary(monthId ?? ""),
@@ -435,6 +278,30 @@ export function useBudgetSummary(monthId: string | null) {
         };
       }
       const result = await getBudgetSummaryVsActual(monthId);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+  });
+}
+
+export function useBudgetSummaryForRange(
+  startMonthId: string | null,
+  endMonthId: string | null
+) {
+  return useQuery<BudgetSummaryVsActual>({
+    queryKey: ["budget", "summary", "range", startMonthId ?? "", endMonthId ?? ""],
+    enabled: !!startMonthId && !!endMonthId,
+    queryFn: async () => {
+      if (!startMonthId || !endMonthId) {
+        return {
+          totals: { planned: 0, actual: 0, variance: 0 },
+          categories: [],
+        };
+      }
+      const result = await getBudgetSummaryVsActualForRange(
+        startMonthId,
+        endMonthId,
+      );
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
