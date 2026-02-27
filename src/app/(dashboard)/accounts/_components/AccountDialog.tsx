@@ -240,6 +240,7 @@ export function AccountDialog({
                       placeholder="Información adicional..."
                       disabled={isPending}
                       {...field}
+                      value={field.value ?? ""}
                     />
                   </FormControl>
                   <FormMessage />
