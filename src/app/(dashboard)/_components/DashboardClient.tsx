@@ -189,6 +189,8 @@ export function DashboardClient() {
         balances={accountMonthlyBalances}
         selectedMonth={fromMonth}
         endMonth={toMonth}
+        baseCurrencyCode={baseCurrency ?? null}
+        baseCurrencySymbol={currencySymbol}
       />
     </div>
   );
