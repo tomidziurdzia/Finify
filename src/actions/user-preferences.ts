@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { z } from "zod";
 
 export interface UserPreferences {
   base_currency: string;
@@ -8,6 +9,11 @@ export interface UserPreferences {
 }
 
 type ActionResult<T> = { data: T } | { error: string };
+
+const UpdateUserPreferencesSchema = z.object({
+  base_currency: z.string().min(1).optional(),
+  fx_source: z.string().min(1).optional(),
+});
 
 export async function getUserPreferences(): Promise<
   ActionResult<UserPreferences>
@@ -38,9 +44,18 @@ export async function getUserPreferences(): Promise<
 }
 
 export async function updateUserPreferences(
-  input: { base_currency?: string; fx_source?: string }
+  input: unknown,
 ): Promise<ActionResult<UserPreferences>> {
   try {
+    const parsed = UpdateUserPreferencesSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        error:
+          parsed.error.issues[0]?.message ??
+          "Datos inválidos para actualizar preferencias",
+      };
+    }
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -48,8 +63,10 @@ export async function updateUserPreferences(
     if (!user) return { error: "No autenticado" };
 
     const payload: Record<string, string> = {};
-    if (input.base_currency != null) payload.base_currency = input.base_currency;
-    if (input.fx_source != null) payload.fx_source = input.fx_source;
+    if (parsed.data.base_currency != null)
+      payload.base_currency = parsed.data.base_currency;
+    if (parsed.data.fx_source != null)
+      payload.fx_source = parsed.data.fx_source;
 
     if (Object.keys(payload).length === 0) {
       return getUserPreferences();
