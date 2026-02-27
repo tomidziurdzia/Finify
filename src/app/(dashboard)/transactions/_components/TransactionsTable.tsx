@@ -75,34 +75,7 @@ import { TransactionDialog } from "./TransactionDialog";
 import { TransferDialog } from "./TransferDialog";
 import { parseISO, format } from "date-fns";
 import type { NextMonthPreview } from "@/types/months";
-
-const MONTHS = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
-];
-
-function formatAmount(value: number): string {
-  return new Intl.NumberFormat("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function amountTone(value: number): string {
-  if (value > 0) return "text-green-600";
-  if (value < 0) return "text-red-600";
-  return "text-muted-foreground";
-}
+import { MONTH_NAMES, formatAmount, amountTone } from "@/lib/format";
 
 const TYPE_BADGE_STYLES: Record<string, string> = {
   income: "bg-green-100 text-green-800 hover:bg-green-100",
@@ -553,7 +526,7 @@ export function TransactionsTable() {
             <SelectContent>
               {sortedMonths.map((month) => (
                 <SelectItem key={month.id} value={month.id}>
-                  {MONTHS[month.month - 1]} {month.year}
+                  {MONTH_NAMES[month.month - 1]} {month.year}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -590,7 +563,7 @@ export function TransactionsTable() {
 
       {selectedMonth && (
         <p className="text-lg font-semibold">
-          {MONTHS[selectedMonth.month - 1]} {selectedMonth.year}
+          {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
         </p>
       )}
 
@@ -692,7 +665,7 @@ export function TransactionsTable() {
       {selectedMonth && (
         <div className="rounded-md border p-3 sm:p-4">
           <p className="text-base font-semibold">
-            Saldos por cuenta - {MONTHS[selectedMonth.month - 1]}{" "}
+            Saldos por cuenta - {MONTH_NAMES[selectedMonth.month - 1]}{" "}
             {selectedMonth.year}
           </p>
           <p className="text-muted-foreground mb-3 text-xs">
@@ -848,7 +821,7 @@ export function TransactionsTable() {
                   <div className="flex flex-col items-center justify-center gap-3">
                     <p className="text-sm">
                       {selectedMonth
-                        ? `No hay transacciones en ${MONTHS[selectedMonth.month - 1]} ${selectedMonth.year}.`
+                        ? `No hay transacciones en ${MONTH_NAMES[selectedMonth.month - 1]} ${selectedMonth.year}.`
                         : "Seleccioná un mes para ver transacciones."}
                     </p>
                     <Button
@@ -992,7 +965,7 @@ export function TransactionsTable() {
             <DialogTitle>Crear nuevo mes</DialogTitle>
             <DialogDescription>
               {nextMonthPreview
-                ? `Vas a crear ${MONTHS[nextMonthPreview.month - 1]} ${nextMonthPreview.year}. Revisá los saldos iniciales por cuenta antes de confirmar.`
+                ? `Vas a crear ${MONTH_NAMES[nextMonthPreview.month - 1]} ${nextMonthPreview.year}. Revisá los saldos iniciales por cuenta antes de confirmar.`
                 : "Calculando saldos iniciales..."}
             </DialogDescription>
           </DialogHeader>

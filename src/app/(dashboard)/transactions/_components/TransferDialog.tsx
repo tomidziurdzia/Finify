@@ -276,7 +276,6 @@ export function TransferDialog({
     }
 
     const formData = {
-      month_id: monthId,
       date,
       source_account_id: sourceAccountId,
       destination_account_id: destinationAccountId,

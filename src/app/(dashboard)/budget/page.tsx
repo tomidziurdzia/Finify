@@ -27,26 +27,18 @@ import {
   useCreateBudgetLine,
   useUpsertBudgetMonthPlan,
 } from "@/hooks/useBudget";
-import { createMonth } from "@/actions/months";
 import { useEnsureCurrentMonth, useMonths } from "@/hooks/useMonths";
+import { useBaseCurrency } from "@/hooks/useTransactions";
+import { useCurrencies } from "@/hooks/useAccounts";
 import { BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/types/budget";
 import type { BudgetLineWithPlan } from "@/types/budget";
-
-const MONTHS = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
-];
-const CURRENCY_SYMBOL = "$";
+import {
+  MONTH_NAMES,
+  formatAmount,
+  amountTone,
+  parseMoneyInput,
+  formatMoneyInput,
+} from "@/lib/format";
 
 const CATEGORY_HEADER_STYLES: Record<string, string> = {
   income: "bg-teal-700 text-white",
@@ -56,39 +48,6 @@ const CATEGORY_HEADER_STYLES: Record<string, string> = {
   savings: "bg-sky-700 text-white",
   investments: "bg-emerald-700 text-white",
 };
-
-function formatAmount(value: number): string {
-  return new Intl.NumberFormat("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function amountTone(value: number): string {
-  if (value > 0) return "text-green-600";
-  if (value < 0) return "text-red-600";
-  return "text-muted-foreground";
-}
-
-function parseMoneyInput(value: string): number | null {
-  const normalized = value
-    .trim()
-    .replace(/\s/g, "")
-    .replace(/\$/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^0-9.-]/g, "");
-
-  if (!normalized) return null;
-  const parsed = Number.parseFloat(normalized);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function formatMoneyInput(value: string): string {
-  const parsed = parseMoneyInput(value);
-  if (parsed == null) return "";
-  return formatAmount(parsed);
-}
 
 export default function BudgetPage() {
   const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
@@ -101,7 +60,15 @@ export default function BudgetPage() {
 
   const { data: months } = useMonths();
   const ensureCurrentMonth = useEnsureCurrentMonth();
+  const { data: baseCurrency } = useBaseCurrency();
+  const { data: currencies } = useCurrencies();
   const sortedMonths = months ?? [];
+
+  const currencySymbol = useMemo(() => {
+    if (!baseCurrency) return "$";
+    const found = currencies?.find((c) => c.code === baseCurrency);
+    return found?.symbol ?? baseCurrency;
+  }, [baseCurrency, currencies]);
   const selectedMonth =
     sortedMonths.find((month) => month.id === selectedMonthId) ?? null;
 
@@ -321,7 +288,7 @@ export default function BudgetPage() {
             <SelectContent>
               {sortedMonths.map((month) => (
                 <SelectItem key={month.id} value={month.id}>
-                  {MONTHS[month.month - 1]} {month.year}
+                  {MONTH_NAMES[month.month - 1]} {month.year}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -344,7 +311,7 @@ export default function BudgetPage() {
 
       {selectedMonth && (
         <p className="text-lg font-semibold">
-          {MONTHS[selectedMonth.month - 1]} {selectedMonth.year}
+          {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
         </p>
       )}
 
@@ -355,7 +322,7 @@ export default function BudgetPage() {
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <p className="text-2xl font-semibold">
-              {CURRENCY_SYMBOL} {formatAmount(summary?.totals.planned ?? 0)}
+              {currencySymbol} {formatAmount(summary?.totals.planned ?? 0)}
             </p>
           </CardContent>
         </Card>
@@ -365,7 +332,7 @@ export default function BudgetPage() {
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <p className="text-2xl font-semibold">
-              {CURRENCY_SYMBOL} {formatAmount(summary?.totals.actual ?? 0)}
+              {currencySymbol} {formatAmount(summary?.totals.actual ?? 0)}
             </p>
           </CardContent>
         </Card>
@@ -377,7 +344,7 @@ export default function BudgetPage() {
             <p
               className={`text-2xl font-semibold ${amountTone(summary?.totals.variance ?? 0)}`}
             >
-              {CURRENCY_SYMBOL} {formatAmount(summary?.totals.variance ?? 0)}
+              {currencySymbol} {formatAmount(summary?.totals.variance ?? 0)}
             </p>
           </CardContent>
         </Card>
@@ -493,11 +460,11 @@ export default function BudgetPage() {
                   <div className="border-t bg-muted/30 px-3 py-2">
                     <div className="grid grid-cols-[1fr_auto] text-xs font-medium">
                       <span>Total</span>
-                      <span>{CURRENCY_SYMBOL} {formatAmount(group.plannedTotal)}</span>
+                      <span>{currencySymbol} {formatAmount(group.plannedTotal)}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">
-                        Ejecutado: {CURRENCY_SYMBOL} {formatAmount(group.actualTotal)}
+                        Ejecutado: {currencySymbol} {formatAmount(group.actualTotal)}
                       </span>
                       <span className={amountTone(group.varianceTotal)}>
                         {executionPercent.toFixed(2)}%
