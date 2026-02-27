@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -10,6 +12,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Form,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormControl,
+  FormMessage,
+} from "@/components/ui/form";
 import {
   Select,
   SelectContent,
@@ -21,25 +31,39 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useUserPreferences, useUpdateUserPreferences } from "@/hooks/useUserPreferences";
 import { useCurrencies } from "@/hooks/useAccounts";
 
-export default function SettingsPage() {
-  const [baseCurrency, setBaseCurrency] = useState("USD");
-  const [fxSource, setFxSource] = useState("frankfurter");
+const SettingsFormSchema = z.object({
+  base_currency: z.string().min(1, "Elija una moneda"),
+  fx_source: z.string().min(1, "Elija una fuente FX"),
+});
 
+type SettingsFormValues = z.infer<typeof SettingsFormSchema>;
+
+export default function SettingsPage() {
   const { data: prefs, isLoading } = useUserPreferences();
   const { data: currencies } = useCurrencies();
   const updatePrefs = useUpdateUserPreferences();
 
+  const form = useForm<SettingsFormValues>({
+    resolver: zodResolver(SettingsFormSchema),
+    defaultValues: {
+      base_currency: "USD",
+      fx_source: "frankfurter",
+    },
+  });
+
   useEffect(() => {
     if (prefs) {
-      setBaseCurrency(prefs.base_currency);
-      setFxSource(prefs.fx_source);
+      form.reset({
+        base_currency: prefs.base_currency,
+        fx_source: prefs.fx_source,
+      });
     }
-  }, [prefs]);
+  }, [prefs, form]);
 
-  const handleSave = async () => {
+  const onSubmit = async (values: SettingsFormValues) => {
     await updatePrefs.mutateAsync({
-      base_currency: baseCurrency,
-      fx_source: fxSource,
+      base_currency: values.base_currency,
+      fx_source: values.fx_source,
     });
   };
 
@@ -61,58 +85,88 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Moneda base</CardTitle>
-          <CardDescription>
-            Todas las conversiones y totales se muestran en esta moneda.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Moneda</Label>
-            <Select value={baseCurrency} onValueChange={setBaseCurrency}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(currencies ?? []).map((c) => (
-                  <SelectItem key={c.code} value={c.code}>
-                    {c.code} ({c.symbol})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6" noValidate>
+          <Card>
+            <CardHeader>
+              <CardTitle>Moneda base</CardTitle>
+              <CardDescription>
+                Todas las conversiones y totales se muestran en esta moneda.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FormField
+                control={form.control}
+                name="base_currency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Moneda</FormLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={updatePrefs.isPending}
+                      >
+                        <SelectTrigger className="w-48">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(currencies ?? []).map((c) => (
+                            <SelectItem key={c.code} value={c.code}>
+                              {c.code} ({c.symbol})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Fuente de cotizaciones</CardTitle>
-          <CardDescription>
-            API usada para obtener tipos de cambio (fiat).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Fuente FX</Label>
-            <Select value={fxSource} onValueChange={setFxSource}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="frankfurter">Frankfurter</SelectItem>
-                <SelectItem value="manual">Manual</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Fuente de cotizaciones</CardTitle>
+              <CardDescription>
+                API usada para obtener tipos de cambio (fiat).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FormField
+                control={form.control}
+                name="fx_source"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fuente FX</FormLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={updatePrefs.isPending}
+                      >
+                        <SelectTrigger className="w-48">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="frankfurter">Frankfurter</SelectItem>
+                          <SelectItem value="manual">Manual</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
-      <Button onClick={handleSave} disabled={updatePrefs.isPending}>
-        {updatePrefs.isPending ? "Guardando..." : "Guardar preferencias"}
-      </Button>
+          <Button type="submit" disabled={updatePrefs.isPending}>
+            {updatePrefs.isPending ? "Guardando..." : "Guardar preferencias"}
+          </Button>
+        </form>
+      </Form>
     </div>
   );
 }

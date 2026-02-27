@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +13,14 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormControl,
+  FormMessage,
+} from "@/components/ui/form";
 import {
   Select,
   SelectContent,
@@ -23,6 +32,7 @@ import { useCreateCategory, useUpdateCategory } from "@/hooks/useBudget";
 import { CreateCategorySchema } from "@/lib/validations/budget.schema";
 import { BUDGET_CATEGORY_TYPES, BUDGET_CATEGORY_LABELS } from "@/types/budget";
 import type { BudgetCategory } from "@/types/budget";
+import type { z } from "zod";
 
 interface CategoryDialogProps {
   category: BudgetCategory | null;
@@ -30,59 +40,56 @@ interface CategoryDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+type CategoryFormValues = z.infer<typeof CreateCategorySchema>;
+
 export function CategoryDialog({
   category,
   open,
   onOpenChange,
 }: CategoryDialogProps) {
   const isEditing = !!category;
-  const [name, setName] = useState("");
-  const [categoryType, setCategoryType] = useState<string>("essential_expenses");
-  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const form = useForm<CategoryFormValues>({
+    resolver: zodResolver(CreateCategorySchema),
+    defaultValues: {
+      name: "",
+      category_type: "essential_expenses",
+      monthly_amount: 0,
+    },
+  });
+
   const createMutation = useCreateCategory();
   const updateMutation = useUpdateCategory();
+  const isPending = createMutation.isPending || updateMutation.isPending;
 
   useEffect(() => {
     if (category) {
-      setName(category.name);
-      setCategoryType(category.category_type);
+      form.reset({
+        name: category.name,
+        category_type: category.category_type,
+        monthly_amount: category.monthly_amount ?? 0,
+      });
     } else {
-      setName("");
-      setCategoryType("essential_expenses");
+      form.reset({
+        name: "",
+        category_type: "essential_expenses",
+        monthly_amount: 0,
+      });
     }
-    setErrors({});
-  }, [category, open]);
+  }, [category, open, form]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrors({});
-    const parsed = CreateCategorySchema.safeParse({
-      name: name.trim(),
-      category_type: categoryType,
-      monthly_amount: 0,
-    });
-    if (!parsed.success) {
-      const fieldErrors: Record<string, string> = {};
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (field && typeof field === "string") fieldErrors[field] = issue.message;
-      }
-      setErrors(fieldErrors);
-      return;
-    }
+  const onSubmit = async (values: CategoryFormValues) => {
     try {
       if (isEditing) {
-        await updateMutation.mutateAsync({ id: category.id, ...parsed.data });
+        await updateMutation.mutateAsync({ id: category.id, ...values });
       } else {
-        await createMutation.mutateAsync(parsed.data);
+        await createMutation.mutateAsync(values);
       }
       onOpenChange(false);
     } catch {
-      // toast in hook
+      // Error handled by mutation onError (toast)
     }
   };
-
-  const isPending = createMutation.isPending || updateMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -97,61 +104,70 @@ export function CategoryDialog({
               : "Agregá una categoría con su tipo de movimiento."}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="cat-name">Nombre</Label>
-            <Input
-              id="cat-name"
-              placeholder="Ej: Alquiler, Supermercado, Sueldo..."
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={isPending}
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nombre</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Ej: Alquiler, Supermercado, Sueldo..."
+                      disabled={isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-            {errors.name && (
-              <p className="text-destructive text-sm">{errors.name}</p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Tipo de movimiento</Label>
-            <Select
-              value={categoryType}
-              onValueChange={setCategoryType}
-              disabled={isPending}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BUDGET_CATEGORY_TYPES.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {BUDGET_CATEGORY_LABELS[type]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.category_type && (
-              <p className="text-destructive text-sm">
-                {errors.category_type}
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending
-                ? "Guardando..."
-                : isEditing
-                  ? "Guardar"
-                  : "Crear"}
-            </Button>
-          </DialogFooter>
-        </form>
+
+            <FormField
+              control={form.control}
+              name="category_type"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Tipo de movimiento</FormLabel>
+                  <FormControl>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      disabled={isPending}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BUDGET_CATEGORY_TYPES.map((type) => (
+                          <SelectItem key={type} value={type}>
+                            {BUDGET_CATEGORY_LABELS[type]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <DialogFooter>
+              <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isPending}>
+                {isPending
+                  ? "Guardando..."
+                  : isEditing
+                    ? "Guardar"
+                    : "Crear"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );

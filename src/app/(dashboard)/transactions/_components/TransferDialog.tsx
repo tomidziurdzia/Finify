@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +12,14 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormControl,
+  FormMessage,
+} from "@/components/ui/form";
 import {
   Select,
   SelectContent,
@@ -38,6 +46,17 @@ interface TransferDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+type TransferFormValues = {
+  date: string;
+  source_account_id: string;
+  destination_account_id: string;
+  description: string;
+  amount: string;
+  exchange_rate: string;
+  destination_amount: string;
+  notes: string;
+};
+
 export function TransferDialog({
   transfer,
   monthId,
@@ -46,16 +65,18 @@ export function TransferDialog({
 }: TransferDialogProps) {
   const isEditing = !!transfer;
 
-  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [sourceAccountId, setSourceAccountId] = useState("");
-  const [destinationAccountId, setDestinationAccountId] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [exchangeRate, setExchangeRate] = useState("1");
-  const [destinationAmount, setDestinationAmount] = useState("");
-  const [notes, setNotes] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [fetchingRate, setFetchingRate] = useState(false);
+  const form = useForm<TransferFormValues>({
+    defaultValues: {
+      date: format(new Date(), "yyyy-MM-dd"),
+      source_account_id: "",
+      destination_account_id: "",
+      description: "",
+      amount: "",
+      exchange_rate: "1",
+      destination_amount: "",
+      notes: "",
+    },
+  });
 
   const { data: accounts } = useAccounts();
   const { data: currencies } = useCurrencies();
@@ -67,36 +88,41 @@ export function TransferDialog({
 
   const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
 
-  const sourceAccount = activeAccounts.find((a) => a.id === sourceAccountId);
-  const destAccount = activeAccounts.find((a) => a.id === destinationAccountId);
+  const watchSourceId = form.watch("source_account_id");
+  const watchDestId = form.watch("destination_account_id");
+  const watchDate = form.watch("date");
+
+  const sourceAccount = activeAccounts.find((a) => a.id === watchSourceId);
+  const destAccount = activeAccounts.find((a) => a.id === watchDestId);
   const destinationCurrency = destAccount?.currency ?? "";
 
   const filteredDestAccounts = activeAccounts.filter(
-    (a) => a.id !== sourceAccountId
+    (a) => a.id !== watchSourceId
   );
 
-  // Track whether the user manually edited destination amount
   const destinationManuallyEdited = useRef(false);
-  // Keep a ref to amount for async FX callback
-  const amountRef = useRef(amount);
-  amountRef.current = amount;
+  const amountRef = useRef(form.getValues("amount"));
+  amountRef.current = form.watch("amount");
 
-  // Auto-fetch exchange rate from source currency to destination currency
+  const [fetchingRate, setFetchingRate] = useState(false);
+
   useEffect(() => {
     if (isEditing || !sourceAccount || !destAccount || !currencies) return;
 
     const sourceCurrency = sourceAccount.currency;
     const targetCurrency = destAccount.currency;
     if (sourceCurrency === targetCurrency) {
-      setExchangeRate("1");
+      form.setValue("exchange_rate", "1");
       const amt = parseNumberInput(amountRef.current);
       if (!isNaN(amt) && amt > 0) {
-          setDestinationAmount(formatNumberInput(String(amt).replace(".", ",")));
+        form.setValue(
+          "destination_amount",
+          formatNumberInput(String(amt).replace(".", ","))
+        );
       }
       return;
     }
 
-    // Check both currencies are fiat
     const sourceCurrencyInfo = currencies.find((c) => c.code === sourceCurrency);
     const targetCurrencyInfo = currencies.find((c) => c.code === targetCurrency);
     if (
@@ -109,18 +135,20 @@ export function TransferDialog({
     let cancelled = false;
     setFetchingRate(true);
 
-    fetchExchangeRate(sourceCurrency, targetCurrency, date).then((rate) => {
+    fetchExchangeRate(sourceCurrency, targetCurrency, watchDate).then((rate) => {
       if (cancelled) return;
       setFetchingRate(false);
       if (rate !== null) {
         const formattedRate = formatNumberInput(String(rate).replace(".", ","));
-        setExchangeRate(formattedRate);
+        form.setValue("exchange_rate", formattedRate);
         destinationManuallyEdited.current = false;
-        // Recalculate base if amount already entered
         const amt = parseNumberInput(amountRef.current);
         if (!isNaN(amt) && amt > 0) {
           const base = Math.round(amt * rate * 100) / 100;
-          setDestinationAmount(formatNumberInput(String(base).replace(".", ",")));
+          form.setValue(
+            "destination_amount",
+            formatNumberInput(String(base).replace(".", ","))
+          );
         }
       }
     });
@@ -129,28 +157,29 @@ export function TransferDialog({
       cancelled = true;
     };
   }, [
-    sourceAccountId,
-    destinationAccountId,
-    date,
     isEditing,
     sourceAccount,
     destAccount,
     currencies,
+    watchDate,
+    watchSourceId,
+    watchDestId,
+    form,
   ]);
 
-  // Auto-generate description from account names
   useEffect(() => {
-    if (isEditing) return;
-    const srcName = sourceAccount?.name;
-    const dstName = destAccount?.name;
-    if (srcName && dstName) {
-      setDescription(`${srcName} → ${dstName}`);
-    } else if (srcName) {
-      setDescription(`${srcName} →`);
-    } else {
-      setDescription("");
+    if (!isEditing && sourceAccount && destAccount) {
+      const srcName = sourceAccount.name;
+      const dstName = destAccount.name;
+      if (srcName && dstName) {
+        form.setValue("description", `${srcName} → ${dstName}`);
+      } else if (srcName) {
+        form.setValue("description", `${srcName} →`);
+      } else {
+        form.setValue("description", "");
+      }
     }
-  }, [sourceAccountId, destinationAccountId, sourceAccount, destAccount, isEditing]);
+  }, [isEditing, sourceAccount, destAccount, watchSourceId, watchDestId, form]);
 
   useEffect(() => {
     if (transfer) {
@@ -159,114 +188,121 @@ export function TransferDialog({
       const destinationLine =
         transfer.amounts.find((line) => line.amount > 0) ?? transfer.amounts[1];
 
-      setDate(transfer.date);
-      setSourceAccountId(sourceLine?.account_id ?? "");
-      setDestinationAccountId(destinationLine?.account_id ?? "");
-      setDescription(transfer.description);
-      setAmount(
-        formatNumberInput(
+      form.reset({
+        date: transfer.date,
+        source_account_id: sourceLine?.account_id ?? "",
+        destination_account_id: destinationLine?.account_id ?? "",
+        description: transfer.description,
+        amount: formatNumberInput(
           String(Math.abs(sourceLine?.amount ?? 0)).replace(".", ",")
-        )
-      );
-      setExchangeRate(
-        formatNumberInput(String(sourceLine?.exchange_rate ?? 1).replace(".", ","))
-      );
-      setDestinationAmount(
-        formatNumberInput(
+        ),
+        exchange_rate: formatNumberInput(
+          String(sourceLine?.exchange_rate ?? 1).replace(".", ",")
+        ),
+        destination_amount: formatNumberInput(
           String(Math.abs(sourceLine?.base_amount ?? 0)).replace(".", ",")
-        )
-      );
-      setNotes(transfer.notes ?? "");
+        ),
+        notes: transfer.notes ?? "",
+      });
     } else {
-      setDate(format(new Date(), "yyyy-MM-dd"));
-      setSourceAccountId(activeAccounts[0]?.id ?? "");
-      setDestinationAccountId("");
-      setDescription("");
-      setAmount("");
-      setExchangeRate("1");
-      setDestinationAmount("");
-      setNotes("");
+      form.reset({
+        date: format(new Date(), "yyyy-MM-dd"),
+        source_account_id: activeAccounts[0]?.id ?? "",
+        destination_account_id: "",
+        description: "",
+        amount: "",
+        exchange_rate: "1",
+        destination_amount: "",
+        notes: "",
+      });
     }
-    setErrors({});
     destinationManuallyEdited.current = false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transfer, open]);
+  }, [transfer, open, activeAccounts.length, form]);
 
   const handleAmountChange = (val: string) => {
     const formatted = formatNumberInput(val);
-    setAmount(formatted);
+    form.setValue("amount", formatted);
     const amt = parseNumberInput(formatted);
     if (destinationManuallyEdited.current) {
-      // User set destination manually → recalculate rate
-      const base = parseNumberInput(destinationAmount);
+      const base = parseNumberInput(form.watch("destination_amount"));
       if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
         const newRate = Math.round((base / amt) * 100000000) / 100000000;
-        setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
+        form.setValue(
+          "exchange_rate",
+          formatNumberInput(String(newRate).replace(".", ","))
+        );
       }
     } else {
-      // Destination was auto-calculated → recalculate from rate
-      const rate = parseNumberInput(exchangeRate);
+      const rate = parseNumberInput(form.watch("exchange_rate"));
       if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
         const newBase = Math.round(amt * rate * 100) / 100;
-        setDestinationAmount(formatNumberInput(String(newBase).replace(".", ",")));
+        form.setValue(
+          "destination_amount",
+          formatNumberInput(String(newBase).replace(".", ","))
+        );
       }
     }
   };
 
   const handleRateChange = (val: string) => {
     const formatted = formatNumberInput(val);
-    setExchangeRate(formatted);
+    form.setValue("exchange_rate", formatted);
     destinationManuallyEdited.current = false;
-    const amt = parseNumberInput(amount);
+    const amt = parseNumberInput(form.watch("amount"));
     const rate = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
       const newBase = Math.round(amt * rate * 100) / 100;
-      setDestinationAmount(formatNumberInput(String(newBase).replace(".", ",")));
+      form.setValue(
+        "destination_amount",
+        formatNumberInput(String(newBase).replace(".", ","))
+      );
     }
   };
 
   const handleDestinationAmountChange = (val: string) => {
     destinationManuallyEdited.current = true;
     const formatted = formatNumberInput(val);
-    setDestinationAmount(formatted);
-    const amt = parseNumberInput(amount);
+    form.setValue("destination_amount", formatted);
+    const amt = parseNumberInput(form.watch("amount"));
     const base = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
       const newRate = Math.round((base / amt) * 100000000) / 100000000;
-      setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
+      form.setValue(
+        "exchange_rate",
+        formatNumberInput(String(newRate).replace(".", ","))
+      );
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrors({});
+  const onSubmit = async (values: TransferFormValues) => {
+    form.clearErrors();
 
-    const amountNum = parseNumberInput(amount);
-    const rateNum = parseNumberInput(exchangeRate);
-    const destinationNum = parseNumberInput(destinationAmount);
+    const amountNum = parseNumberInput(values.amount);
+    const rateNum = parseNumberInput(values.exchange_rate);
+    const destinationNum = parseNumberInput(values.destination_amount);
 
     if (isEditing) {
       try {
         await updateMutation.mutateAsync({
           id: transfer.id,
-          date,
-          description,
+          date: values.date,
+          description: values.description,
           amounts: [
             {
-              account_id: sourceAccountId,
+              account_id: values.source_account_id,
               amount: -Math.abs(isNaN(amountNum) ? 0 : amountNum),
               exchange_rate: isNaN(rateNum) ? 1 : rateNum,
               base_amount: -Math.abs(isNaN(destinationNum) ? 0 : destinationNum),
             },
             {
-              account_id: destinationAccountId,
+              account_id: values.destination_account_id,
               amount: Math.abs(isNaN(amountNum) ? 0 : amountNum),
               exchange_rate: isNaN(rateNum) ? 1 : rateNum,
               base_amount: Math.abs(isNaN(destinationNum) ? 0 : destinationNum),
             },
           ],
           category_id: null,
-          notes: notes || null,
+          notes: values.notes || null,
         });
         onOpenChange(false);
       } catch {
@@ -276,26 +312,30 @@ export function TransferDialog({
     }
 
     const formData = {
-      date,
-      source_account_id: sourceAccountId,
-      destination_account_id: destinationAccountId,
-      description,
+      date: values.date,
+      source_account_id: values.source_account_id,
+      destination_account_id: values.destination_account_id,
+      description: values.description,
       amount: isNaN(amountNum) ? 0 : amountNum,
       exchange_rate: isNaN(rateNum) ? 1 : rateNum,
       base_amount: isNaN(destinationNum) ? 0 : destinationNum,
-      notes,
+      notes: values.notes,
     };
 
     const parsed = CreateTransferSchema.safeParse(formData);
     if (!parsed.success) {
-      const fieldErrors: Record<string, string> = {};
+      const fieldMap: Record<string, keyof TransferFormValues> = {
+        base_amount: "destination_amount",
+      };
       for (const issue of parsed.error.issues) {
         const field = issue.path[0];
         if (field && typeof field === "string") {
-          fieldErrors[field] = issue.message;
+          const key = (fieldMap[field] ?? field) as keyof TransferFormValues;
+          if (key in form.getValues()) {
+            form.setError(key, { message: issue.message });
+          }
         }
       }
-      setErrors(fieldErrors);
       return;
     }
 
@@ -321,191 +361,222 @@ export function TransferDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Fecha */}
-          <div className="space-y-2">
-            <Label htmlFor="tf-date">Fecha</Label>
-            <Input
-              id="tf-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              disabled={isPending}
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="space-y-4"
+            noValidate
+          >
+            <FormField
+              control={form.control}
+              name="date"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Fecha</FormLabel>
+                  <FormControl>
+                    <Input type="date" disabled={isPending} {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-            {errors.date && (
-              <p className="text-destructive text-sm">{errors.date}</p>
-            )}
-          </div>
 
-          {/* Cuentas */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Cuenta origen</Label>
-              <Select
-                value={sourceAccountId}
-                onValueChange={(val) => {
-                  setSourceAccountId(val);
-                  if (val === destinationAccountId) {
-                    setDestinationAccountId("");
-                  }
-                }}
-                disabled={isPending || isEditing}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Seleccionar" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeAccounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name} ({a.currency})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.source_account_id && (
-                <p className="text-destructive text-sm">
-                  {errors.source_account_id}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Cuenta destino</Label>
-              <Select
-                value={destinationAccountId}
-                onValueChange={setDestinationAccountId}
-                disabled={isPending || isEditing}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Seleccionar" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredDestAccounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name} ({a.currency})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.destination_account_id && (
-                <p className="text-destructive text-sm">
-                  {errors.destination_account_id}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Descripción */}
-          <div className="space-y-2">
-            <Label htmlFor="tf-desc">Descripción</Label>
-            <Input
-              id="tf-desc"
-              placeholder="Ej: Traspaso a broker, Recarga wallet..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={isPending}
-            />
-            {errors.description && (
-              <p className="text-destructive text-sm">{errors.description}</p>
-            )}
-          </div>
-
-          {/* Monto + TC + Base */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="tf-amount">
-                Monto{sourceAccount ? ` (${sourceAccount.currency})` : ""}
-              </Label>
-              <Input
-                id="tf-amount"
-                type="text"
-                inputMode="decimal"
-                placeholder="0,00"
-                value={amount}
-                onChange={(e) => handleAmountChange(e.target.value)}
-                disabled={isPending}
-              />
-              {errors.amount && (
-                <p className="text-destructive text-sm">{errors.amount}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tf-rate">
-                Tipo de cambio
-                {fetchingRate && (
-                  <Loader2 className="ml-1 inline size-3 animate-spin" />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="source_account_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Cuenta origen</FormLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          if (val === form.getValues("destination_account_id")) {
+                            form.setValue("destination_account_id", "");
+                          }
+                        }}
+                        disabled={isPending || isEditing}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Seleccionar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeAccounts.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.name} ({a.currency})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )}
-              </Label>
-              <Input
-                id="tf-rate"
-                type="text"
-                inputMode="decimal"
-                placeholder="1"
-                value={exchangeRate}
-                onChange={(e) => handleRateChange(e.target.value)}
-                disabled={isPending}
               />
-              {errors.exchange_rate && (
-                <p className="text-destructive text-sm">
-                  {errors.exchange_rate}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tf-base">
-                Monto destino{destinationCurrency ? ` (${destinationCurrency})` : ""}
-              </Label>
-              <Input
-                id="tf-base"
-                type="text"
-                inputMode="decimal"
-                placeholder="0,00"
-                value={destinationAmount}
-                onChange={(e) => handleDestinationAmountChange(e.target.value)}
-                disabled={isPending}
+              <FormField
+                control={form.control}
+                name="destination_account_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Cuenta destino</FormLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={isPending || isEditing}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Seleccionar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {filteredDestAccounts.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.name} ({a.currency})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              <p className="text-muted-foreground text-xs">
-                Monto en la moneda de la cuenta destino.
-              </p>
-              {errors.base_amount && (
-                <p className="text-destructive text-sm">
-                  {errors.base_amount}
-                </p>
-              )}
             </div>
-          </div>
 
-          {/* Notas */}
-          <div className="space-y-2">
-            <Label htmlFor="tf-notes">Notas (opcional)</Label>
-            <Input
-              id="tf-notes"
-              placeholder="Información adicional..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={isPending}
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Descripción</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Ej: Traspaso a broker, Recarga wallet..."
+                      disabled={isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-            {errors.notes && (
-              <p className="text-destructive text-sm">{errors.notes}</p>
-            )}
-          </div>
 
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending
-                ? "Guardando..."
-                : isEditing
-                  ? "Guardar cambios"
-                  : "Crear transferencia"}
-            </Button>
-          </DialogFooter>
-        </form>
+            <div className="grid grid-cols-3 gap-4">
+              <FormField
+                control={form.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Monto{sourceAccount ? ` (${sourceAccount.currency})` : ""}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        disabled={isPending}
+                        value={field.value}
+                        onChange={(e) => handleAmountChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="exchange_rate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Tipo de cambio
+                      {fetchingRate && (
+                        <Loader2 className="ml-1 inline size-3 animate-spin" />
+                      )}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="1"
+                        disabled={isPending}
+                        value={field.value}
+                        onChange={(e) => handleRateChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="destination_amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Monto destino
+                      {destinationCurrency ? ` (${destinationCurrency})` : ""}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        disabled={isPending}
+                        value={field.value}
+                        onChange={(e) =>
+                          handleDestinationAmountChange(e.target.value)
+                        }
+                      />
+                    </FormControl>
+                    <p className="text-muted-foreground text-xs">
+                      Monto en la moneda de la cuenta destino.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notas (opcional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Información adicional..."
+                      disabled={isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isPending}>
+                {isPending
+                  ? "Guardando..."
+                  : isEditing
+                    ? "Guardar cambios"
+                    : "Crear transferencia"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );
