@@ -6,6 +6,7 @@ import {
   CreateTransferSchema,
   UpdateTransactionSchema,
 } from "@/lib/validations/transaction.schema";
+import { getOrFetchFxRate } from "@/actions/fx";
 import type {
   Transaction,
   TransactionWithRelations,
@@ -73,6 +74,10 @@ export async function getTransactions(
   monthId: string
 ): Promise<ActionResult<TransactionWithRelations[]>> {
   try {
+    const baseCurrencyResult = await getBaseCurrency();
+    if ("error" in baseCurrencyResult) return baseCurrencyResult;
+    const baseCurrency = baseCurrencyResult.data;
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -106,36 +111,69 @@ export async function getTransactions(
 
     if (error) return { error: error.message };
 
+    const fxCache = new Map<string, number>();
+
+    const getRate = async (date: string, from: string): Promise<number> => {
+      if (from === baseCurrency) return 1;
+      const key = `${date}:${from}:${baseCurrency}`;
+      const cached = fxCache.get(key);
+      if (cached != null) return cached;
+      const result = await getOrFetchFxRate({ date, from, to: baseCurrency });
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+      fxCache.set(key, result.data);
+      return result.data;
+    };
+
+    const mapped: TransactionWithRelations[] = [];
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mapped = (data ?? []).map((row: any) => ({
-      id: row.id,
-      user_id: row.user_id,
-      month_id: row.month_id,
-      category_id: row.category_id,
-      transaction_type: row.transaction_type,
-      date: row.date,
-      description: row.description,
-      notes: row.notes,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      category_name: row.budget_categories?.name ?? null,
-      category_type: row.budget_categories?.category_type ?? null,
-      amounts: (row.transaction_amounts ?? []).map(
-        (line: any): TransactionAmountWithRelations => ({
+    for (const row of (data ?? []) as any[]) {
+      const txDate = row.date as string;
+      const amounts: TransactionAmountWithRelations[] = [];
+
+      for (const line of row.transaction_amounts ?? []) {
+        const amount = Number(line.amount);
+        const originalCurrency = line.original_currency as string;
+        let currentBaseAmount: number | undefined;
+        if (txDate && originalCurrency && amount) {
+          const rate = await getRate(txDate, originalCurrency);
+          currentBaseAmount = amount * rate;
+        }
+
+        amounts.push({
           id: line.id,
           transaction_id: line.transaction_id,
           account_id: line.account_id,
-          amount: Number(line.amount),
-          original_currency: line.original_currency,
+          amount,
+          original_currency: originalCurrency,
           exchange_rate: Number(line.exchange_rate),
           base_amount: Number(line.base_amount),
           created_at: line.created_at,
           account_name: line.accounts?.name ?? "",
           account_currency_symbol:
             line.currencies?.symbol ?? line.original_currency,
-        })
-      ),
-    })) as TransactionWithRelations[];
+          current_base_amount: currentBaseAmount,
+        });
+      }
+
+      mapped.push({
+        id: row.id,
+        user_id: row.user_id,
+        month_id: row.month_id,
+        category_id: row.category_id,
+        transaction_type: row.transaction_type,
+        date: row.date,
+        description: row.description,
+        notes: row.notes,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        category_name: row.budget_categories?.name ?? null,
+        category_type: row.budget_categories?.category_type ?? null,
+        amounts,
+      });
+    }
 
     return { data: mapped };
   } catch (e) {
@@ -154,6 +192,10 @@ export async function getTransactionsForRange(
   if (monthIds.length === 0) return { data: [] };
 
   try {
+    const baseCurrencyResult = await getBaseCurrency();
+    if ("error" in baseCurrencyResult) return baseCurrencyResult;
+    const baseCurrency = baseCurrencyResult.data;
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -187,11 +229,56 @@ export async function getTransactionsForRange(
 
     if (error) return { error: error.message };
 
+    const fxCache = new Map<string, number>();
+
+    const getRate = async (date: string, from: string): Promise<number> => {
+      if (from === baseCurrency) return 1;
+      const key = `${date}:${from}:${baseCurrency}`;
+      const cached = fxCache.get(key);
+      if (cached != null) return cached;
+      const result = await getOrFetchFxRate({ date, from, to: baseCurrency });
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+      fxCache.set(key, result.data);
+      return result.data;
+    };
+
+    const mapped: TransactionWithRelations[] = [];
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mapped = (data ?? []).map((row: any) => {
+    for (const row of (data ?? []) as any[]) {
       const cat = row.budget_categories;
       const category = Array.isArray(cat) ? cat[0] : cat;
-      return {
+      const txDate = row.date as string;
+      const amounts: TransactionAmountWithRelations[] = [];
+
+      for (const line of row.transaction_amounts ?? []) {
+        const amount = Number(line.amount);
+        const originalCurrency = line.original_currency as string;
+        let currentBaseAmount: number | undefined;
+        if (txDate && originalCurrency && amount) {
+          const rate = await getRate(txDate, originalCurrency);
+          currentBaseAmount = amount * rate;
+        }
+
+        amounts.push({
+          id: line.id,
+          transaction_id: line.transaction_id,
+          account_id: line.account_id,
+          amount,
+          original_currency: originalCurrency,
+          exchange_rate: Number(line.exchange_rate),
+          base_amount: Number(line.base_amount),
+          created_at: line.created_at,
+          account_name: line.accounts?.name ?? "",
+          account_currency_symbol:
+            line.currencies?.symbol ?? line.original_currency,
+          current_base_amount: currentBaseAmount,
+        });
+      }
+
+      mapped.push({
         id: row.id,
         user_id: row.user_id,
         month_id: row.month_id,
@@ -204,23 +291,9 @@ export async function getTransactionsForRange(
         updated_at: row.updated_at,
         category_name: category?.name ?? null,
         category_type: category?.category_type ?? null,
-        amounts: (row.transaction_amounts ?? []).map(
-          (line: any): TransactionAmountWithRelations => ({
-            id: line.id,
-            transaction_id: line.transaction_id,
-            account_id: line.account_id,
-            amount: Number(line.amount),
-            original_currency: line.original_currency,
-            exchange_rate: Number(line.exchange_rate),
-            base_amount: Number(line.base_amount),
-            created_at: line.created_at,
-            account_name: line.accounts?.name ?? "",
-            account_currency_symbol:
-              line.currencies?.symbol ?? line.original_currency,
-          })
-        ),
-      };
-    }) as TransactionWithRelations[];
+        amounts,
+      });
+    }
 
     return { data: mapped };
   } catch (e) {

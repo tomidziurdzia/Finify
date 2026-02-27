@@ -11,6 +11,8 @@ import {
   UpdateCategorySchema,
 } from "@/lib/validations/budget.schema";
 import { createMonth, getMonthsInRange } from "@/actions/months";
+import { getOrFetchFxRate } from "@/actions/fx";
+import { getBaseCurrency } from "@/actions/transactions";
 import type {
   BudgetCategory,
   BudgetLine,
@@ -675,6 +677,10 @@ export async function getBudgetSummaryVsActual(
   monthId: string,
 ): Promise<ActionResult<BudgetSummaryVsActual>> {
   try {
+    const baseCurrencyResult = await getBaseCurrency();
+    if ("error" in baseCurrencyResult) return baseCurrencyResult;
+    const baseCurrency = baseCurrencyResult.data;
+
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
     const month = await getMonthForUser(userId, monthId);
@@ -724,8 +730,9 @@ export async function getBudgetSummaryVsActual(
       .from("transactions")
       .select(
         `
+        date,
         category_id,
-        transaction_amounts ( base_amount )
+        transaction_amounts ( amount, original_currency )
       `,
       )
       .eq("user_id", userId)
@@ -743,13 +750,42 @@ export async function getBudgetSummaryVsActual(
       ]),
     );
     const actualByCategory = new Map<string, number>();
-    for (const row of txRows ?? []) {
+
+    const fxCache = new Map<string, number>();
+
+    const getRate = async (date: string, from: string): Promise<number> => {
+      if (from === baseCurrency) return 1;
+      const key = `${date}:${from}:${baseCurrency}`;
+      const cached = fxCache.get(key);
+      if (cached != null) return cached;
+
+      const result = await getOrFetchFxRate({
+        date,
+        from,
+        to: baseCurrency,
+      });
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+      fxCache.set(key, result.data);
+      return result.data;
+    };
+
+    for (const row of (txRows ?? []) as any[]) {
       const categoryId = row.category_id as string | null;
       if (!categoryId) continue;
-      const sumBase = (row.transaction_amounts ?? []).reduce(
-        (acc, amountRow) => acc + Number(amountRow.base_amount),
-        0,
-      );
+      const txDate = row.date as string;
+      if (!txDate) continue;
+
+      let sumBase = 0;
+      for (const amountRow of row.transaction_amounts ?? []) {
+        const from = amountRow.original_currency as string;
+        const amount = Number(amountRow.amount);
+        if (!from || !amount) continue;
+        const rate = await getRate(txDate, from);
+        sumBase += amount * rate;
+      }
+
       const categoryType = categoryTypeById.get(categoryId);
       const normalized =
         categoryType === "income" ? sumBase : Math.abs(sumBase);
@@ -807,6 +843,10 @@ export async function getBudgetSummaryVsActualForRange(
   }
 
   try {
+    const baseCurrencyResult = await getBaseCurrency();
+    if ("error" in baseCurrencyResult) return baseCurrencyResult;
+    const baseCurrency = baseCurrencyResult.data;
+
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
 
@@ -854,8 +894,9 @@ export async function getBudgetSummaryVsActualForRange(
       .from("transactions")
       .select(
         `
+        date,
         category_id,
-        transaction_amounts ( base_amount )
+        transaction_amounts ( amount, original_currency )
       `,
       )
       .eq("user_id", userId)
@@ -871,13 +912,42 @@ export async function getBudgetSummaryVsActualForRange(
       ]),
     );
     const actualByCategory = new Map<string, number>();
-    for (const row of txRows ?? []) {
+
+    const fxCache = new Map<string, number>();
+
+    const getRate = async (date: string, from: string): Promise<number> => {
+      if (from === baseCurrency) return 1;
+      const key = `${date}:${from}:${baseCurrency}`;
+      const cached = fxCache.get(key);
+      if (cached != null) return cached;
+
+      const result = await getOrFetchFxRate({
+        date,
+        from,
+        to: baseCurrency,
+      });
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+      fxCache.set(key, result.data);
+      return result.data;
+    };
+
+    for (const row of (txRows ?? []) as any[]) {
       const categoryId = row.category_id as string | null;
       if (!categoryId) continue;
-      const sumBase = (row.transaction_amounts ?? []).reduce(
-        (acc, amountRow) => acc + Number(amountRow.base_amount),
-        0,
-      );
+      const txDate = row.date as string;
+      if (!txDate) continue;
+
+      let sumBase = 0;
+      for (const amountRow of row.transaction_amounts ?? []) {
+        const from = amountRow.original_currency as string;
+        const amount = Number(amountRow.amount);
+        if (!from || !amount) continue;
+        const rate = await getRate(txDate, from);
+        sumBase += amount * rate;
+      }
+
       const categoryType = categoryTypeById.get(categoryId);
       const normalized =
         categoryType === "income" ? sumBase : Math.abs(sumBase);

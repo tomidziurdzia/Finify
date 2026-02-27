@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getOrFetchFxRate } from "@/actions/fx";
 import type {
   Month,
   OpeningBalance,
@@ -101,6 +102,15 @@ export async function previewNextMonthFromLatest(): Promise<
       : { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
 
     const supabase = await createClient();
+
+    // Moneda base actual del usuario
+    const { data: prefsRow } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrency = prefsRow?.base_currency ?? "USD";
+
     const { data: accounts, error: accountsError } = await supabase
       .from("accounts")
       .select("id, name, currency")
@@ -172,12 +182,43 @@ export async function previewNextMonthFromLatest(): Promise<
       }
     }
 
-    const balances: OpeningBalancePreview[] = (accounts ?? []).map((account) => {
+    const fxDate = `${target.year}-${String(target.month).padStart(
+      2,
+      "0",
+    )}-01`;
+    const fxCache = new Map<string, number>();
+
+    const getRate = async (from: string): Promise<number> => {
+      if (from === baseCurrency) return 1;
+      const key = `${fxDate}:${from}:${baseCurrency}`;
+      const cached = fxCache.get(key);
+      if (cached != null) return cached;
+      const result = await getOrFetchFxRate({
+        date: fxDate,
+        from,
+        to: baseCurrency,
+      });
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+      fxCache.set(key, result.data);
+      return result.data;
+    };
+
+    const balances: OpeningBalancePreview[] = [];
+    for (const account of accounts ?? []) {
       const opening = openingsByAccount.get(account.id) ?? {
         opening_amount: 0,
         opening_base_amount: 0,
       };
-      return {
+
+      let currentOpeningBase: number | undefined;
+      if (opening.opening_amount) {
+        const rate = await getRate(account.currency);
+        currentOpeningBase = opening.opening_amount * rate;
+      }
+
+      balances.push({
         account_id: account.id,
         account_name: account.name,
         account_currency: account.currency,
@@ -185,8 +226,9 @@ export async function previewNextMonthFromLatest(): Promise<
           symbolByCode.get(account.currency) ?? account.currency,
         opening_amount: opening.opening_amount,
         opening_base_amount: opening.opening_base_amount,
-      };
-    });
+        current_opening_base_amount: currentOpeningBase,
+      });
+    }
 
     return {
       data: {
@@ -377,6 +419,30 @@ export async function getOpeningBalances(
     if (!userId) return { error: "No autenticado" };
 
     const supabase = await createClient();
+
+    // Obtener año/mes del mes para poder fijar una fecha de referencia de FX (primer día del mes)
+    const { data: monthRow, error: monthError } = await supabase
+      .from("months")
+      .select("year, month")
+      .eq("id", monthId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (monthError) return { error: monthError.message };
+    if (!monthRow) return { error: "Mes no encontrado" };
+
+    const fxDate = `${monthRow.year}-${String(monthRow.month).padStart(
+      2,
+      "0",
+    )}-01`;
+
+    // Moneda base actual del usuario
+    const { data: prefsRow } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrency = prefsRow?.base_currency ?? "USD";
+
     const { data, error } = await supabase
       .from("opening_balances")
       .select(
@@ -411,21 +477,52 @@ export async function getOpeningBalances(
       }
     }
 
+    const fxCache = new Map<string, number>();
+
+    const getRate = async (from: string): Promise<number> => {
+      if (from === baseCurrency) return 1;
+      const key = `${fxDate}:${from}:${baseCurrency}`;
+      const cached = fxCache.get(key);
+      if (cached != null) return cached;
+      const result = await getOrFetchFxRate({
+        date: fxDate,
+        from,
+        to: baseCurrency,
+      });
+      if ("error" in result) {
+        throw new Error(result.error);
+      }
+      fxCache.set(key, result.data);
+      return result.data;
+    };
+
+    const mapped: OpeningBalance[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mapped = (data ?? []).map((row: any) => ({
-      id: row.id,
-      month_id: row.month_id,
-      account_id: row.account_id,
-      opening_amount: Number(row.opening_amount),
-      opening_base_amount: Number(row.opening_base_amount),
-      created_at: row.created_at,
-      account_name: row.accounts?.name ?? "",
-      account_currency: row.accounts?.currency ?? "",
-      account_currency_symbol:
-        symbolByCode.get(row.accounts?.currency ?? "") ??
-        row.accounts?.currency ??
-        "",
-    })) as OpeningBalance[];
+    for (const row of (data ?? []) as any[]) {
+      const opening_amount = Number(row.opening_amount);
+      const opening_base_amount = Number(row.opening_base_amount);
+      const accountCurrency = row.accounts?.currency ?? "";
+
+      let currentOpeningBase: number | undefined;
+      if (opening_amount && accountCurrency) {
+        const rate = await getRate(accountCurrency);
+        currentOpeningBase = opening_amount * rate;
+      }
+
+      mapped.push({
+        id: row.id,
+        month_id: row.month_id,
+        account_id: row.account_id,
+        opening_amount,
+        opening_base_amount,
+        created_at: row.created_at,
+        account_name: row.accounts?.name ?? "",
+        account_currency: accountCurrency,
+        account_currency_symbol:
+          symbolByCode.get(accountCurrency) ?? accountCurrency ?? "",
+        current_opening_base_amount: currentOpeningBase,
+      });
+    }
 
     return { data: mapped };
   } catch {
