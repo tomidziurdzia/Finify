@@ -14,3 +14,18 @@ CREATE TABLE public.fx_rates (
   UNIQUE (rate_date, from_currency, to_currency, source)
 );
 
+ALTER TABLE public.fx_rates ENABLE ROW LEVEL SECURITY;
+
+-- Permitir leer tipos de cambio a cualquier rol (anon/authenticated),
+-- ya que no contienen datos sensibles por usuario.
+CREATE POLICY "Allow select on fx_rates"
+  ON public.fx_rates
+  FOR SELECT
+  USING (true);
+
+-- Permitir insertar filas desde el backend (server actions) para cachear FX.
+CREATE POLICY "Allow insert on fx_rates"
+  ON public.fx_rates
+  FOR INSERT
+  WITH CHECK (true);
+

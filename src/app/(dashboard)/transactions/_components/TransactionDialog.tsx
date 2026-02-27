@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
+import { useForm } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormField,
+  FormItem,
+  FormLabel as FormFieldLabel,
+  FormControl,
+  FormMessage,
+} from "@/components/ui/form";
 import {
   Select,
   SelectContent,
@@ -50,6 +59,18 @@ const DIALOG_TRANSACTION_TYPES: TransactionType[] = [
   "correction",
 ];
 
+type TransactionFormValues = {
+  date: string;
+  transaction_type: TransactionType;
+  account_id: string;
+  category_id: string;
+  description: string;
+  amount: string;
+  exchange_rate: string;
+  base_amount: string;
+  notes: string;
+};
+
 export function TransactionDialog({
   transaction,
   monthId,
@@ -58,17 +79,19 @@ export function TransactionDialog({
 }: TransactionDialogProps) {
   const isEditing = !!transaction;
 
-  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [transactionType, setTransactionType] = useState<string>("expense");
-  const [accountId, setAccountId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [exchangeRate, setExchangeRate] = useState("1");
-  const [baseAmount, setBaseAmount] = useState("");
-  const [notes, setNotes] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [fetchingRate, setFetchingRate] = useState(false);
+  const form = useForm<TransactionFormValues>({
+    defaultValues: {
+      date: format(new Date(), "yyyy-MM-dd"),
+      transaction_type: "expense",
+      account_id: "",
+      category_id: "",
+      description: "",
+      amount: "",
+      exchange_rate: "1",
+      base_amount: "",
+      notes: "",
+    },
+  });
 
   const { data: accounts } = useAccounts();
   const { data: currencies } = useCurrencies();
@@ -79,17 +102,23 @@ export function TransactionDialog({
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
+  const fetchingRateRef = useRef(false);
+
   const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
 
-  const selectedAccount = activeAccounts.find((a) => a.id === accountId);
+  const watchTransactionType = form.watch("transaction_type");
+  const watchAccountId = form.watch("account_id");
+  const watchDate = form.watch("date");
 
-  const showCategory = transactionType !== "transfer";
+  const selectedAccount = activeAccounts.find((a) => a.id === watchAccountId);
+
+  const showCategory = watchTransactionType !== "transfer";
 
   // Track whether the user manually edited base_amount
   const baseManuallyEdited = useRef(false);
   // Keep a ref to amount for async FX callback
-  const amountRef = useRef(amount);
-  amountRef.current = amount;
+  const amountRef = useRef(form.getValues("amount"));
+  amountRef.current = form.watch("amount");
 
   // Auto-fetch exchange rate from Frankfurter when account or date changes
   useEffect(() => {
@@ -97,13 +126,12 @@ export function TransactionDialog({
 
     const accountCurrency = selectedAccount.currency;
     if (accountCurrency === baseCurrency) {
-      setExchangeRate("1");
+      form.setValue("exchange_rate", "1");
       return;
     }
 
-    // Check both currencies are fiat
     const accountCurrencyInfo = currencies.find(
-      (c) => c.code === accountCurrency
+      (c) => c.code === accountCurrency,
     );
     const baseCurrencyInfo = currencies.find((c) => c.code === baseCurrency);
     if (
@@ -114,20 +142,24 @@ export function TransactionDialog({
     }
 
     let cancelled = false;
-    setFetchingRate(true);
+    fetchingRateRef.current = true;
 
-    fetchExchangeRate(accountCurrency, baseCurrency, date).then((rate) => {
+    fetchExchangeRate(accountCurrency, baseCurrency, watchDate).then((rate) => {
       if (cancelled) return;
-      setFetchingRate(false);
+      fetchingRateRef.current = false;
       if (rate !== null) {
-        const formattedRate = formatNumberInput(String(rate).replace(".", ","));
-        setExchangeRate(formattedRate);
+        const formattedRate = formatNumberInput(
+          String(rate).replace(".", ","),
+        );
+        form.setValue("exchange_rate", formattedRate);
         baseManuallyEdited.current = false;
-        // Recalculate base if amount already entered
         const amt = parseNumberInput(amountRef.current);
         if (!isNaN(amt) && amt > 0) {
           const base = Math.round(amt * rate * 100) / 100;
-          setBaseAmount(formatNumberInput(String(base).replace(".", ",")));
+          form.setValue(
+            "base_amount",
+            formatNumberInput(String(base).replace(".", ",")),
+          );
         }
       }
     });
@@ -135,132 +167,160 @@ export function TransactionDialog({
     return () => {
       cancelled = true;
     };
-  }, [accountId, date, isEditing, selectedAccount, baseCurrency, currencies]);
+  }, [isEditing, selectedAccount, baseCurrency, currencies, watchDate, form]);
 
   // Sync form when transaction changes
   useEffect(() => {
     if (transaction) {
       const line = transaction.amounts[0];
-      setDate(transaction.date);
-      setTransactionType(transaction.transaction_type);
-      setAccountId(line?.account_id ?? "");
-      setCategoryId(transaction.category_id ?? "");
-      setDescription(transaction.description);
-      setAmount(
-        formatNumberInput(String(Math.abs(line?.amount ?? 0)).replace(".", ","))
-      );
-      setExchangeRate(
-        formatNumberInput(String(line?.exchange_rate ?? 1).replace(".", ","))
-      );
-      setBaseAmount(
-        formatNumberInput(
-          String(Math.abs(line?.base_amount ?? 0)).replace(".", ",")
-        )
-      );
-      setNotes(transaction.notes ?? "");
+      form.reset({
+        date: transaction.date,
+        transaction_type: transaction.transaction_type,
+        account_id: line?.account_id ?? "",
+        category_id: transaction.category_id ?? "",
+        description: transaction.description,
+        amount: formatNumberInput(
+          String(Math.abs(line?.amount ?? 0)).replace(".", ","),
+        ),
+        exchange_rate: formatNumberInput(
+          String(line?.exchange_rate ?? 1).replace(".", ","),
+        ),
+        base_amount: formatNumberInput(
+          String(Math.abs(line?.base_amount ?? 0)).replace(".", ","),
+        ),
+        notes: transaction.notes ?? "",
+      });
     } else {
-      setDate(format(new Date(), "yyyy-MM-dd"));
-      setTransactionType("expense");
-      setAccountId(activeAccounts[0]?.id ?? "");
-      setCategoryId("");
-      setDescription("");
-      setAmount("");
-      setExchangeRate("1");
-      setBaseAmount("");
-      setNotes("");
+      form.reset({
+        date: format(new Date(), "yyyy-MM-dd"),
+        transaction_type: "expense",
+        account_id: activeAccounts[0]?.id ?? "",
+        category_id: "",
+        description: "",
+        amount: "",
+        exchange_rate: "1",
+        base_amount: "",
+        notes: "",
+      });
     }
-    setErrors({});
     baseManuallyEdited.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transaction, open]);
+  }, [transaction, open, activeAccounts.length]);
 
   const handleAmountChange = (val: string) => {
     const formatted = formatNumberInput(val);
-    setAmount(formatted);
+    form.setValue("amount", formatted);
     const amt = parseNumberInput(formatted);
     if (baseManuallyEdited.current) {
       // User set base manually → recalculate rate
-      const base = parseNumberInput(baseAmount);
+      const base = parseNumberInput(form.watch("base_amount"));
       if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
         const newRate = Math.round((base / amt) * 100000000) / 100000000;
-        setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
+        form.setValue(
+          "exchange_rate",
+          formatNumberInput(String(newRate).replace(".", ",")),
+        );
       }
     } else {
       // Base was auto-calculated → recalculate base from rate
-      const rate = parseNumberInput(exchangeRate);
+      const rate = parseNumberInput(form.watch("exchange_rate"));
       if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
         const newBase = Math.round(amt * rate * 100) / 100;
-        setBaseAmount(formatNumberInput(String(newBase).replace(".", ",")));
+        form.setValue(
+          "base_amount",
+          formatNumberInput(String(newBase).replace(".", ",")),
+        );
       }
     }
   };
 
   const handleRateChange = (val: string) => {
     const formatted = formatNumberInput(val);
-    setExchangeRate(formatted);
+    form.setValue("exchange_rate", formatted);
     baseManuallyEdited.current = false;
-    const amt = parseNumberInput(amount);
+    const amt = parseNumberInput(form.watch("amount"));
     const rate = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
       const newBase = Math.round(amt * rate * 100) / 100;
-      setBaseAmount(formatNumberInput(String(newBase).replace(".", ",")));
+      form.setValue(
+        "base_amount",
+        formatNumberInput(String(newBase).replace(".", ",")),
+      );
     }
   };
 
   const handleBaseAmountChange = (val: string) => {
     baseManuallyEdited.current = true;
     const formatted = formatNumberInput(val);
-    setBaseAmount(formatted);
-    const amt = parseNumberInput(amount);
+    form.setValue("base_amount", formatted);
+    const amt = parseNumberInput(form.watch("amount"));
     const base = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
       const newRate = Math.round((base / amt) * 100000000) / 100000000;
-      setExchangeRate(formatNumberInput(String(newRate).replace(".", ",")));
+      form.setValue(
+        "exchange_rate",
+        formatNumberInput(String(newRate).replace(".", ",")),
+      );
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrors({});
+  const onSubmit = async (values: TransactionFormValues) => {
+    form.clearErrors();
 
-    const amountNum = parseNumberInput(amount);
-    const rateNum = parseNumberInput(exchangeRate);
-    const baseNum = parseNumberInput(baseAmount);
+    const amountNum = parseNumberInput(values.amount);
+    const rateNum = parseNumberInput(values.exchange_rate);
+    const baseNum = parseNumberInput(values.base_amount);
 
     const formData = {
-      date,
-      transaction_type: transactionType,
-      category_id: showCategory ? categoryId || null : null,
-      description,
+      date: values.date,
+      transaction_type: values.transaction_type,
+      category_id: showCategory ? values.category_id || null : null,
+      description: values.description,
       amounts: [
         {
-          account_id: accountId,
+          account_id: values.account_id,
           amount: isNaN(amountNum) ? 0 : amountNum,
           exchange_rate: isNaN(rateNum) ? 1 : rateNum,
           base_amount: isNaN(baseNum) ? 0 : baseNum,
         },
       ],
-      notes,
+      notes: values.notes,
     };
 
     const parsed = CreateTransactionSchema.safeParse(formData);
     if (!parsed.success) {
-      const fieldErrors: Record<string, string> = {};
       for (const issue of parsed.error.issues) {
         const first = issue.path[0];
         if (first === "amounts") {
           const lineField = issue.path[2];
           if (typeof lineField === "string") {
-            fieldErrors[lineField] = issue.message;
+            const map: Record<string, keyof TransactionFormValues> = {
+              account_id: "account_id",
+              amount: "amount",
+              exchange_rate: "exchange_rate",
+              base_amount: "base_amount",
+            };
+            const key = map[lineField];
+            if (key) {
+              form.setError(key, { message: issue.message });
+            }
           }
           continue;
         }
         if (first && typeof first === "string") {
-          const field = first;
-          fieldErrors[field] = issue.message;
+          const mapRoot: Record<string, keyof TransactionFormValues> = {
+            date: "date",
+            transaction_type: "transaction_type",
+            category_id: "category_id",
+            description: "description",
+            notes: "notes",
+          };
+          const key = mapRoot[first];
+          if (key) {
+            form.setError(key, { message: issue.message });
+          }
         }
       }
-      setErrors(fieldErrors);
       return;
     }
 
@@ -307,191 +367,234 @@ export function TransactionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="space-y-4"
+            noValidate
+          >
           {/* Row 1: Fecha + Tipo */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="tx-date">Fecha</Label>
-              <Input
-                id="tx-date"
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                disabled={isPending}
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="date"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormFieldLabel>Fecha</FormFieldLabel>
+                    <FormControl>
+                      <Input type="date" disabled={isPending} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              {errors.date && (
-                <p className="text-destructive text-sm">{errors.date}</p>
-              )}
+              <FormField
+                control={form.control}
+                name="transaction_type"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormFieldLabel>Tipo</FormFieldLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={isPending || isEditing}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DIALOG_TRANSACTION_TYPES.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {TRANSACTION_TYPE_LABELS[type]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
-            <div className="space-y-2">
-              <Label>Tipo</Label>
-              <Select
-                value={transactionType}
-                onValueChange={setTransactionType}
-                disabled={isPending || isEditing}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIALOG_TRANSACTION_TYPES.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {TRANSACTION_TYPE_LABELS[type]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.transaction_type && (
-                <p className="text-destructive text-sm">
-                  {errors.transaction_type}
-                </p>
-              )}
-            </div>
-          </div>
 
           {/* Row 2: Cuenta + Categoría */}
-          <div className={`grid gap-4 ${showCategory ? "grid-cols-2" : "grid-cols-1"}`}>
-            <div className="space-y-2">
-              <Label>Cuenta</Label>
-              <Select
-                value={accountId}
-                onValueChange={setAccountId}
-                disabled={isPending || isEditing}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Seleccionar cuenta" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeAccounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name} ({a.currency})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.account_id && (
-                <p className="text-destructive text-sm">{errors.account_id}</p>
+          <div
+            className={`grid gap-4 ${showCategory ? "grid-cols-2" : "grid-cols-1"}`}
+          >
+            <FormField
+              control={form.control}
+              name="account_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormFieldLabel>Cuenta</FormFieldLabel>
+                  <FormControl>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      disabled={isPending || isEditing}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Seleccionar cuenta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeAccounts.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name} ({a.currency})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
               )}
-            </div>
+            />
             {showCategory && (
-              <div className="space-y-2">
-                <Label>Categoría</Label>
-                <Select
-                  value={categoryId}
-                  onValueChange={setCategoryId}
-                  disabled={isPending}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccionar categoría" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(categories ?? []).map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.category_id && (
-                  <p className="text-destructive text-sm">
-                    {errors.category_id}
-                  </p>
+              <FormField
+                control={form.control}
+                name="category_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormFieldLabel>Categoría</FormFieldLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={isPending}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Seleccionar categoría" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(categories ?? []).map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
                 )}
-              </div>
+              />
             )}
           </div>
 
           {/* Row 3: Descripción */}
-          <div className="space-y-2">
-            <Label htmlFor="tx-desc">Descripción</Label>
-            <Input
-              id="tx-desc"
-              placeholder="Ej: Supermercado, Sueldo, etc."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={isPending}
-            />
-            {errors.description && (
-              <p className="text-destructive text-sm">{errors.description}</p>
+          <FormField
+            control={form.control}
+            name="description"
+            render={({ field }) => (
+              <FormItem>
+                <FormFieldLabel>Descripción</FormFieldLabel>
+                <FormControl>
+                  <Input
+                    placeholder="Ej: Supermercado, Sueldo, etc."
+                    disabled={isPending}
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
             )}
-          </div>
+          />
 
           {/* Row 4: Monto + TC + Monto base */}
           <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="tx-amount">
-                Monto{selectedAccount ? ` (${selectedAccount.currency})` : ""}
-              </Label>
-              <Input
-                id="tx-amount"
-                type="text"
-                inputMode="decimal"
-                placeholder="0,00"
-                value={amount}
-                onChange={(e) => handleAmountChange(e.target.value)}
-                disabled={isPending}
-              />
-              {errors.amount && (
-                <p className="text-destructive text-sm">{errors.amount}</p>
+            <FormField
+              control={form.control}
+              name="amount"
+              render={({ field }) => (
+                <FormItem>
+                  <FormFieldLabel>
+                    Monto
+                    {selectedAccount ? ` (${selectedAccount.currency})` : ""}
+                  </FormFieldLabel>
+                  <FormControl>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      disabled={isPending}
+                      value={field.value}
+                      onChange={(e) => handleAmountChange(e.target.value)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
               )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tx-rate">
-                Tipo de cambio
-                {fetchingRate && (
-                  <Loader2 className="ml-1 inline size-3 animate-spin" />
-                )}
-              </Label>
-              <Input
-                id="tx-rate"
-                type="text"
-                inputMode="decimal"
-                placeholder="1"
-                value={exchangeRate}
-                onChange={(e) => handleRateChange(e.target.value)}
-                disabled={isPending}
-              />
-              {errors.exchange_rate && (
-                <p className="text-destructive text-sm">
-                  {errors.exchange_rate}
-                </p>
+            />
+            <FormField
+              control={form.control}
+              name="exchange_rate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormFieldLabel>
+                    Tipo de cambio
+                    {fetchingRateRef.current && (
+                      <Loader2 className="ml-1 inline size-3 animate-spin" />
+                    )}
+                  </FormFieldLabel>
+                  <FormControl>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="1"
+                      disabled={isPending}
+                      value={field.value}
+                      onChange={(e) => handleRateChange(e.target.value)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
               )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tx-base">
-                Monto base{baseCurrency ? ` (${baseCurrency})` : ""}
-              </Label>
-              <Input
-                id="tx-base"
-                type="text"
-                inputMode="decimal"
-                placeholder="0,00"
-                value={baseAmount}
-                onChange={(e) => handleBaseAmountChange(e.target.value)}
-                disabled={isPending}
-              />
-              {errors.base_amount && (
-                <p className="text-destructive text-sm">
-                  {errors.base_amount}
-                </p>
+            />
+            <FormField
+              control={form.control}
+              name="base_amount"
+              render={({ field }) => (
+                <FormItem>
+                  <FormFieldLabel>
+                    Monto base{baseCurrency ? ` (${baseCurrency})` : ""}
+                  </FormFieldLabel>
+                  <FormControl>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      disabled={isPending}
+                      value={field.value}
+                      onChange={(e) =>
+                        handleBaseAmountChange(e.target.value)
+                      }
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
               )}
-            </div>
+            />
           </div>
 
           {/* Row 5: Notas */}
-          <div className="space-y-2">
-            <Label htmlFor="tx-notes">Notas (opcional)</Label>
-            <Input
-              id="tx-notes"
-              placeholder="Información adicional..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={isPending}
-            />
-            {errors.notes && (
-              <p className="text-destructive text-sm">{errors.notes}</p>
+          <FormField
+            control={form.control}
+            name="notes"
+            render={({ field }) => (
+              <FormItem>
+                <FormFieldLabel>Notas (opcional)</FormFieldLabel>
+                <FormControl>
+                  <Input
+                    placeholder="Información adicional..."
+                    disabled={isPending}
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
             )}
-          </div>
+          />
 
           <DialogFooter>
             <Button
@@ -510,6 +613,7 @@ export function TransactionDialog({
             </Button>
           </DialogFooter>
         </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );
