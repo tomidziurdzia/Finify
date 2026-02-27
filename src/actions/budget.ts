@@ -2,27 +2,20 @@
 
 import { createClient } from "@/lib/supabase/server";
 import {
-  ApplyBudgetLineToCalendarMonthsSchema,
-  ApplyBudgetLineToSelectedMonthsSchema,
-  ApplyBudgetLineToMonthsSchema,
   CreateBudgetNextMonthFromSourceSchema,
   CreateBudgetLineSchema,
   CreateBudgetYearSchema,
   CreateCategorySchema,
-  CreateOrUpdateBudgetRecurrenceRuleSchema,
-  MaterializeBudgetRecurrenceSchema,
   UpsertBudgetMonthPlanSchema,
   UpdateBudgetLineSchema,
   UpdateCategorySchema,
 } from "@/lib/validations/budget.schema";
-import { createMonth } from "@/actions/months";
+import { createMonth, getMonthsInRange } from "@/actions/months";
 import type {
   BudgetCategory,
   BudgetLine,
   BudgetLineWithPlan,
   BudgetMonthPlan,
-  BudgetRecurrenceRule,
-  BudgetRecurrenceRuleWithLine,
   BudgetSummaryVsActual,
   BudgetYear,
 } from "@/types/budget";
@@ -51,7 +44,7 @@ function monthCode(year: number, month: number): number {
 function addMonths(
   year: number,
   month: number,
-  offset: number
+  offset: number,
 ): { year: number; month: number } {
   const total = year * 12 + (month - 1) + offset;
   return {
@@ -66,7 +59,7 @@ function monthDiff(start: MonthLite, end: MonthLite): number {
 
 async function getMonthForUser(
   userId: string,
-  monthId: string
+  monthId: string,
 ): Promise<ActionResult<MonthLite>> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -129,7 +122,7 @@ export async function getBudgetYears(): Promise<ActionResult<BudgetYear[]>> {
 }
 
 export async function getOrCreateBudgetYear(
-  year: number
+  year: number,
 ): Promise<ActionResult<BudgetYear>> {
   try {
     const parsed = CreateBudgetYearSchema.safeParse({ year });
@@ -186,7 +179,7 @@ export async function getBudgetCategories(): Promise<
 }
 
 export async function createCategory(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<BudgetCategory>> {
   try {
     const parsed = CreateCategorySchema.safeParse(input);
@@ -212,7 +205,8 @@ export async function createCategory(
       .single();
 
     if (error) {
-      if (error.code === "23505") return { error: "Ya existe una categoría con ese nombre" };
+      if (error.code === "23505")
+        return { error: "Ya existe una categoría con ese nombre" };
       return { error: error.message };
     }
     return { data: data as BudgetCategory };
@@ -222,7 +216,7 @@ export async function createCategory(
 }
 
 export async function updateCategory(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<BudgetCategory>> {
   try {
     const parsed = UpdateCategorySchema.safeParse(input);
@@ -245,7 +239,8 @@ export async function updateCategory(
       .single();
 
     if (error) {
-      if (error.code === "23505") return { error: "Ya existe una categoría con ese nombre" };
+      if (error.code === "23505")
+        return { error: "Ya existe una categoría con ese nombre" };
       return { error: error.message };
     }
     return { data: data as BudgetCategory };
@@ -275,7 +270,7 @@ export async function deleteCategory(id: string): Promise<ActionResult<null>> {
 
 // --- BUDGET LINES + MONTH PLANS ---
 export async function getBudgetLines(
-  monthId: string
+  monthId: string,
 ): Promise<ActionResult<BudgetLineWithPlan[]>> {
   try {
     const userId = await getUserId();
@@ -291,7 +286,7 @@ export async function getBudgetLines(
         `
         id, user_id, category_id, name, display_order, is_active, created_at, updated_at,
         budget_categories!inner(id, name, category_type)
-      `
+      `,
       )
       .eq("user_id", userId)
       .order("display_order", { ascending: true })
@@ -317,7 +312,7 @@ export async function getBudgetLines(
           month_id: plan.month_id,
           planned_amount: Number(plan.planned_amount),
         },
-      ])
+      ]),
     );
 
     const mapped = lines.map((line) => {
@@ -334,7 +329,9 @@ export async function getBudgetLines(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             category_type: any;
           }[];
-      const category = Array.isArray(categoryRaw) ? categoryRaw[0] : categoryRaw;
+      const category = Array.isArray(categoryRaw)
+        ? categoryRaw[0]
+        : categoryRaw;
       const typedCategory = category as {
         id: string;
         name: string;
@@ -366,7 +363,7 @@ export async function getBudgetLines(
 }
 
 export async function createBudgetLine(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<BudgetLine>> {
   try {
     const parsed = CreateBudgetLineSchema.safeParse(input);
@@ -412,7 +409,7 @@ export async function createBudgetLine(
 }
 
 export async function updateBudgetLine(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<BudgetLine>> {
   try {
     const parsed = UpdateBudgetLineSchema.safeParse(input);
@@ -456,7 +453,9 @@ export async function updateBudgetLine(
   }
 }
 
-export async function deleteBudgetLine(id: string): Promise<ActionResult<null>> {
+export async function deleteBudgetLine(
+  id: string,
+): Promise<ActionResult<null>> {
   try {
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
@@ -475,7 +474,7 @@ export async function deleteBudgetLine(id: string): Promise<ActionResult<null>> 
 }
 
 export async function upsertBudgetMonthPlan(
-  input: unknown
+  input: unknown,
 ): Promise<ActionResult<BudgetMonthPlan>> {
   try {
     const parsed = UpsertBudgetMonthPlanSchema.safeParse(input);
@@ -507,7 +506,7 @@ export async function upsertBudgetMonthPlan(
           month_id: parsed.data.month_id,
           planned_amount: parsed.data.planned_amount,
         },
-        { onConflict: "line_id,month_id" }
+        { onConflict: "line_id,month_id" },
       )
       .select()
       .single();
@@ -524,167 +523,7 @@ export async function upsertBudgetMonthPlan(
   }
 }
 
-export async function applyBudgetLineToMonths(
-  input: unknown
-): Promise<ActionResult<{ affected: number; month_ids: string[] }>> {
-  try {
-    const parsed = ApplyBudgetLineToMonthsSchema.safeParse(input);
-    if (!parsed.success) {
-      return { error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
-    }
-
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    const { data: line, error: lineError } = await supabase
-      .from("budget_lines")
-      .select("id")
-      .eq("id", parsed.data.line_id)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (lineError) return { error: lineError.message };
-    if (!line) return { error: "Línea de presupuesto no encontrada" };
-
-    const startMonth = await getMonthForUser(userId, parsed.data.start_month_id);
-    if ("error" in startMonth) return startMonth;
-
-    const monthIds: string[] = [];
-    for (let i = 0; i < parsed.data.months_count; i += 1) {
-      const target = addMonths(startMonth.data.year, startMonth.data.month, i);
-      const monthResult = await createMonth(target.year, target.month);
-      if ("error" in monthResult) return { error: monthResult.error };
-      monthIds.push(monthResult.data.id);
-    }
-
-    const rows = monthIds.map((monthId) => ({
-      line_id: parsed.data.line_id,
-      month_id: monthId,
-      planned_amount: parsed.data.planned_amount,
-    }));
-
-    const { data, error } = await supabase
-      .from("budget_month_plans")
-      .upsert(rows, { onConflict: "line_id,month_id" })
-      .select("id");
-    if (error) return { error: error.message };
-
-    return { data: { affected: data?.length ?? 0, month_ids: monthIds } };
-  } catch {
-    return { error: "Error al aplicar línea a varios meses" };
-  }
-}
-
-export async function applyBudgetLineToSelectedMonths(
-  input: unknown
-): Promise<ActionResult<{ affected: number; month_ids: string[] }>> {
-  try {
-    const parsed = ApplyBudgetLineToSelectedMonthsSchema.safeParse(input);
-    if (!parsed.success) {
-      return { error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
-    }
-
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    const { data: line, error: lineError } = await supabase
-      .from("budget_lines")
-      .select("id")
-      .eq("id", parsed.data.line_id)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (lineError) return { error: lineError.message };
-    if (!line) return { error: "Línea de presupuesto no encontrada" };
-
-    const uniqueMonthIds = Array.from(new Set(parsed.data.month_ids));
-    if (uniqueMonthIds.length === 0) {
-      return { error: "Seleccioná al menos un mes" };
-    }
-
-    const { data: validMonths, error: monthError } = await supabase
-      .from("months")
-      .select("id")
-      .eq("user_id", userId)
-      .in("id", uniqueMonthIds);
-    if (monthError) return { error: monthError.message };
-
-    const validMonthIds = new Set((validMonths ?? []).map((month) => month.id));
-    if (validMonthIds.size !== uniqueMonthIds.length) {
-      return { error: "Alguno de los meses seleccionados no es válido" };
-    }
-
-    const rows = uniqueMonthIds.map((monthId) => ({
-      line_id: parsed.data.line_id,
-      month_id: monthId,
-      planned_amount: parsed.data.planned_amount,
-    }));
-
-    const { data, error } = await supabase
-      .from("budget_month_plans")
-      .upsert(rows, { onConflict: "line_id,month_id" })
-      .select("id");
-    if (error) return { error: error.message };
-
-    return { data: { affected: data?.length ?? 0, month_ids: uniqueMonthIds } };
-  } catch {
-    return { error: "Error al aplicar línea a meses seleccionados" };
-  }
-}
-
-export async function applyBudgetLineToCalendarMonths(
-  input: unknown
-): Promise<ActionResult<{ affected: number; month_ids: string[] }>> {
-  try {
-    const parsed = ApplyBudgetLineToCalendarMonthsSchema.safeParse(input);
-    if (!parsed.success) {
-      return { error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
-    }
-
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    const { data: line, error: lineError } = await supabase
-      .from("budget_lines")
-      .select("id")
-      .eq("id", parsed.data.line_id)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (lineError) return { error: lineError.message };
-    if (!line) return { error: "Línea de presupuesto no encontrada" };
-
-    const monthNumbers = Array.from(new Set(parsed.data.months)).sort(
-      (a, b) => a - b,
-    );
-    const monthIds: string[] = [];
-    for (const monthNumber of monthNumbers) {
-      const monthResult = await createMonth(parsed.data.year, monthNumber);
-      if ("error" in monthResult) return { error: monthResult.error };
-      monthIds.push(monthResult.data.id);
-    }
-
-    const rows = monthIds.map((monthId) => ({
-      line_id: parsed.data.line_id,
-      month_id: monthId,
-      planned_amount: parsed.data.planned_amount,
-    }));
-
-    const { data, error } = await supabase
-      .from("budget_month_plans")
-      .upsert(rows, { onConflict: "line_id,month_id" })
-      .select("id");
-    if (error) return { error: error.message };
-
-    return { data: { affected: data?.length ?? 0, month_ids: monthIds } };
-  } catch {
-    return { error: "Error al aplicar línea a meses de calendario" };
-  }
-}
-
-export async function createBudgetNextMonthFromSource(
-  input: unknown
-): Promise<
+export async function createBudgetNextMonthFromSource(input: unknown): Promise<
   ActionResult<{
     month_id: string;
     year: number;
@@ -701,16 +540,23 @@ export async function createBudgetNextMonthFromSource(
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
 
-    const sourceMonth = await getMonthForUser(userId, parsed.data.source_month_id);
+    const sourceMonth = await getMonthForUser(
+      userId,
+      parsed.data.source_month_id,
+    );
     if ("error" in sourceMonth) return sourceMonth;
 
-    const targetDate = addMonths(sourceMonth.data.year, sourceMonth.data.month, 1);
+    const targetDate = addMonths(
+      sourceMonth.data.year,
+      sourceMonth.data.month,
+      1,
+    );
     const createdMonth = await createMonth(targetDate.year, targetDate.month);
     if ("error" in createdMonth) return { error: createdMonth.error };
 
     const supabase = await createClient();
     const entryCategoryIds = Array.from(
-      new Set(parsed.data.entries.map((entry) => entry.category_id))
+      new Set(parsed.data.entries.map((entry) => entry.category_id)),
     );
 
     const { data: categories, error: categoriesError } = await supabase
@@ -742,7 +588,7 @@ export async function createBudgetNextMonthFromSource(
     }
 
     const missingCategories = (categories ?? []).filter(
-      (category) => !primaryLineByCategoryId.has(category.id)
+      (category) => !primaryLineByCategoryId.has(category.id),
     );
     if (missingCategories.length > 0) {
       const { error: insertLinesError } = await supabase
@@ -754,17 +600,18 @@ export async function createBudgetNextMonthFromSource(
             name: category.name,
             display_order: category.display_order ?? 0,
             is_active: true,
-          }))
+          })),
         );
       if (insertLinesError) return { error: insertLinesError.message };
 
-      const { data: refreshedLines, error: refreshedLinesError } = await supabase
-        .from("budget_lines")
-        .select("id, category_id, display_order, name")
-        .eq("user_id", userId)
-        .in("category_id", entryCategoryIds)
-        .order("display_order", { ascending: true })
-        .order("name", { ascending: true });
+      const { data: refreshedLines, error: refreshedLinesError } =
+        await supabase
+          .from("budget_lines")
+          .select("id, category_id, display_order, name")
+          .eq("user_id", userId)
+          .in("category_id", entryCategoryIds)
+          .order("display_order", { ascending: true })
+          .order("name", { ascending: true });
       if (refreshedLinesError) return { error: refreshedLinesError.message };
 
       primaryLineByCategoryId.clear();
@@ -823,347 +670,9 @@ export async function createBudgetNextMonthFromSource(
   }
 }
 
-// --- RECURRENCE RULES ---
-export async function getBudgetRecurrenceRules(
-  lineId?: string
-): Promise<ActionResult<BudgetRecurrenceRuleWithLine[]>> {
-  try {
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    let query = supabase
-      .from("budget_recurrence_rules")
-      .select(
-        `
-        id, line_id, start_month_id, end_month_id, mode, amount, is_active, created_at, updated_at,
-        budget_lines!inner (
-          id, user_id, name,
-          budget_categories!inner ( name )
-        )
-      `
-      )
-      .eq("budget_lines.user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (lineId) query = query.eq("line_id", lineId);
-
-    const { data, error } = await query;
-    if (error) return { error: error.message };
-
-    const mapped = (data ?? []).map((row) => {
-      const lineRaw = row.budget_lines as
-        | {
-            name: string;
-            budget_categories: { name: string } | { name: string }[];
-          }
-        | {
-            name: string;
-            budget_categories: { name: string } | { name: string }[];
-          }[];
-      const line = Array.isArray(lineRaw) ? lineRaw[0] : lineRaw;
-      const categoryRaw = line?.budget_categories;
-      const category = Array.isArray(categoryRaw) ? categoryRaw[0] : categoryRaw;
-      const typedLine = line as {
-        name: string;
-      };
-      const typedCategory = category as {
-        name: string;
-      };
-      return {
-        id: row.id,
-        line_id: row.line_id,
-        start_month_id: row.start_month_id,
-        end_month_id: row.end_month_id,
-        mode: row.mode,
-        amount: Number(row.amount),
-        is_active: row.is_active,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        line_name: typedLine?.name ?? "",
-        category_name: typedCategory?.name ?? "",
-      };
-    }) as BudgetRecurrenceRuleWithLine[];
-
-    return { data: mapped };
-  } catch {
-    return { error: "Error al obtener reglas recurrentes" };
-  }
-}
-
-export async function createOrUpdateBudgetRecurrenceRule(
-  input: unknown
-): Promise<ActionResult<BudgetRecurrenceRule>> {
-  try {
-    const parsed = CreateOrUpdateBudgetRecurrenceRuleSchema.safeParse(input);
-    if (!parsed.success) {
-      return { error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
-    }
-
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    const { data: line, error: lineError } = await supabase
-      .from("budget_lines")
-      .select("id")
-      .eq("id", parsed.data.line_id)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (lineError) return { error: lineError.message };
-    if (!line) return { error: "Línea de presupuesto no encontrada" };
-
-    const startMonth = await getMonthForUser(userId, parsed.data.start_month_id);
-    if ("error" in startMonth) return startMonth;
-
-    let endMonthCode: number | null = null;
-    if (parsed.data.end_month_id) {
-      const endMonth = await getMonthForUser(userId, parsed.data.end_month_id);
-      if ("error" in endMonth) return endMonth;
-      endMonthCode = monthCode(endMonth.data.year, endMonth.data.month);
-      const startCode = monthCode(startMonth.data.year, startMonth.data.month);
-      if (endMonthCode < startCode) {
-        return { error: "El mes final no puede ser anterior al mes inicial" };
-      }
-    }
-
-    if (parsed.data.id) {
-      const { data: existing, error: existingError } = await supabase
-        .from("budget_recurrence_rules")
-        .select("id, line_id")
-        .eq("id", parsed.data.id)
-        .maybeSingle();
-      if (existingError) return { error: existingError.message };
-      if (!existing) return { error: "Regla no encontrada" };
-      if (existing.line_id !== parsed.data.line_id) {
-        return {
-          error:
-            "La regla pertenece a otra línea. No se puede cambiar la línea asociada",
-        };
-      }
-    }
-
-    const payload = {
-      line_id: parsed.data.line_id,
-      start_month_id: parsed.data.start_month_id,
-      end_month_id: parsed.data.end_month_id,
-      mode: parsed.data.mode,
-      amount: parsed.data.amount,
-      is_active: parsed.data.is_active,
-    };
-
-    const result = parsed.data.id
-      ? await supabase
-          .from("budget_recurrence_rules")
-          .update(payload)
-          .eq("id", parsed.data.id)
-          .select()
-          .single()
-      : await supabase
-          .from("budget_recurrence_rules")
-          .insert(payload)
-          .select()
-          .single();
-
-    if (result.error) return { error: result.error.message };
-
-    return {
-      data: {
-        ...(result.data as BudgetRecurrenceRule),
-        amount: Number(result.data.amount),
-      },
-    };
-  } catch {
-    return { error: "Error al guardar regla recurrente" };
-  }
-}
-
-export async function deleteBudgetRecurrenceRule(
-  id: string
-): Promise<ActionResult<null>> {
-  try {
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    const { data: existing, error: existingError } = await supabase
-      .from("budget_recurrence_rules")
-      .select(
-        `
-        id,
-        budget_lines!inner ( user_id )
-      `
-      )
-      .eq("id", id)
-      .eq("budget_lines.user_id", userId)
-      .maybeSingle();
-    if (existingError) return { error: existingError.message };
-    if (!existing) return { error: "Regla no encontrada" };
-
-    const { error } = await supabase
-      .from("budget_recurrence_rules")
-      .delete()
-      .eq("id", id);
-    if (error) return { error: error.message };
-    return { data: null };
-  } catch {
-    return { error: "Error al eliminar regla recurrente" };
-  }
-}
-
-export async function materializeBudgetRecurrenceForRange(
-  input: unknown
-): Promise<ActionResult<{ affected: number; month_ids: string[] }>> {
-  try {
-    const parsed = MaterializeBudgetRecurrenceSchema.safeParse(input);
-    if (!parsed.success) {
-      return { error: parsed.error.issues[0]?.message ?? "Datos inválidos" };
-    }
-
-    const userId = await getUserId();
-    if (!userId) return { error: "No autenticado" };
-    const supabase = await createClient();
-
-    const startMonth = await getMonthForUser(userId, parsed.data.start_month_id);
-    if ("error" in startMonth) return startMonth;
-    const endMonth = await getMonthForUser(userId, parsed.data.end_month_id);
-    if ("error" in endMonth) return endMonth;
-
-    if (monthDiff(startMonth.data, endMonth.data) < 0) {
-      return { error: "El rango de meses es inválido" };
-    }
-
-    const totalMonths = monthDiff(startMonth.data, endMonth.data) + 1;
-    const materializedMonths: MonthLite[] = [];
-    for (let i = 0; i < totalMonths; i += 1) {
-      const target = addMonths(startMonth.data.year, startMonth.data.month, i);
-      const created = await createMonth(target.year, target.month);
-      if ("error" in created) return { error: created.error };
-      materializedMonths.push({
-        id: created.data.id,
-        year: created.data.year,
-        month: created.data.month,
-      });
-    }
-
-    const targetMonthIds = materializedMonths.map((m) => m.id);
-    const targetCodeByMonthId = new Map(
-      materializedMonths.map((m) => [m.id, monthCode(m.year, m.month)])
-    );
-
-    const { data: rules, error: rulesError } = await supabase
-      .from("budget_recurrence_rules")
-      .select(
-        `
-        id, line_id, start_month_id, end_month_id, mode, amount, is_active, created_at,
-        budget_lines!inner ( user_id )
-      `
-      )
-      .eq("is_active", true)
-      .eq("budget_lines.user_id", userId);
-    if (rulesError) return { error: rulesError.message };
-    if (!rules || rules.length === 0) {
-      return { data: { affected: 0, month_ids: targetMonthIds } };
-    }
-
-    const ruleMonthIds = Array.from(
-      new Set(
-        rules
-          .flatMap((rule) => [rule.start_month_id, rule.end_month_id].filter(Boolean))
-          .map((id) => id as string)
-      )
-    );
-
-    const { data: ruleMonths, error: ruleMonthsError } = await supabase
-      .from("months")
-      .select("id, year, month")
-      .eq("user_id", userId)
-      .in("id", ruleMonthIds);
-    if (ruleMonthsError) return { error: ruleMonthsError.message };
-
-    const ruleCodeByMonthId = new Map(
-      (ruleMonths ?? []).map((month) => [month.id, monthCode(month.year, month.month)])
-    );
-
-    const lineIds = Array.from(new Set(rules.map((rule) => rule.line_id)));
-    const { data: existingPlans, error: existingPlansError } = await supabase
-      .from("budget_month_plans")
-      .select("line_id, month_id, planned_amount")
-      .in("line_id", lineIds)
-      .in("month_id", targetMonthIds);
-    if (existingPlansError) return { error: existingPlansError.message };
-
-    const existingAmount = new Map(
-      (existingPlans ?? []).map((plan) => [
-        `${plan.line_id}:${plan.month_id}`,
-        Number(plan.planned_amount),
-      ])
-    );
-
-    const workingAmount = new Map<string, number>();
-    const touched = new Set<string>();
-
-    const sortedRules = [...rules].sort((a, b) =>
-      a.created_at.localeCompare(b.created_at)
-    );
-
-    for (const rule of sortedRules) {
-      const startCode = ruleCodeByMonthId.get(rule.start_month_id);
-      if (!startCode) continue;
-      const endCode = rule.end_month_id
-        ? ruleCodeByMonthId.get(rule.end_month_id) ?? Number.POSITIVE_INFINITY
-        : Number.POSITIVE_INFINITY;
-
-      for (const monthId of targetMonthIds) {
-        const targetCode = targetCodeByMonthId.get(monthId);
-        if (!targetCode) continue;
-        if (targetCode < startCode || targetCode > endCode) continue;
-
-        const key = `${rule.line_id}:${monthId}`;
-        const currentValue =
-          workingAmount.get(key) ?? existingAmount.get(key) ?? 0;
-        const nextValue =
-          rule.mode === "set"
-            ? Number(rule.amount)
-            : currentValue + Number(rule.amount);
-        workingAmount.set(key, nextValue);
-        touched.add(key);
-      }
-    }
-
-    if (touched.size === 0) {
-      return { data: { affected: 0, month_ids: targetMonthIds } };
-    }
-
-    const rows = Array.from(touched).map((key) => {
-      const [line_id, month_id] = key.split(":");
-      return {
-        line_id,
-        month_id,
-        planned_amount: workingAmount.get(key) ?? existingAmount.get(key) ?? 0,
-      };
-    });
-
-    const { data: upserted, error: upsertError } = await supabase
-      .from("budget_month_plans")
-      .upsert(rows, { onConflict: "line_id,month_id" })
-      .select("id");
-    if (upsertError) return { error: upsertError.message };
-
-    return {
-      data: {
-        affected: upserted?.length ?? 0,
-        month_ids: targetMonthIds,
-      },
-    };
-  } catch {
-    return { error: "Error al materializar reglas recurrentes" };
-  }
-}
-
 // --- SUMMARY: PLAN VS REAL ---
 export async function getBudgetSummaryVsActual(
-  monthId: string
+  monthId: string,
 ): Promise<ActionResult<BudgetSummaryVsActual>> {
   try {
     const userId = await getUserId();
@@ -1188,7 +697,7 @@ export async function getBudgetSummaryVsActual(
 
     const lineIds = (lines ?? []).map((line) => line.id);
     const lineToCategory = new Map(
-      (lines ?? []).map((line) => [line.id, line.category_id])
+      (lines ?? []).map((line) => [line.id, line.category_id]),
     );
 
     const plannedByCategory = new Map<string, number>();
@@ -1204,7 +713,10 @@ export async function getBudgetSummaryVsActual(
         const categoryId = lineToCategory.get(plan.line_id);
         if (!categoryId) continue;
         const current = plannedByCategory.get(categoryId) ?? 0;
-        plannedByCategory.set(categoryId, current + Number(plan.planned_amount));
+        plannedByCategory.set(
+          categoryId,
+          current + Number(plan.planned_amount),
+        );
       }
     }
 
@@ -1214,7 +726,7 @@ export async function getBudgetSummaryVsActual(
         `
         category_id,
         transaction_amounts ( base_amount )
-      `
+      `,
       )
       .eq("user_id", userId)
       .eq("month_id", monthId)
@@ -1225,7 +737,10 @@ export async function getBudgetSummaryVsActual(
     if (txError) return { error: txError.message };
 
     const categoryTypeById = new Map(
-      (categories ?? []).map((category) => [category.id, category.category_type])
+      (categories ?? []).map((category) => [
+        category.id,
+        category.category_type,
+      ]),
     );
     const actualByCategory = new Map<string, number>();
     for (const row of txRows ?? []) {
@@ -1233,7 +748,7 @@ export async function getBudgetSummaryVsActual(
       if (!categoryId) continue;
       const sumBase = (row.transaction_amounts ?? []).reduce(
         (acc, amountRow) => acc + Number(amountRow.base_amount),
-        0
+        0,
       );
       const categoryType = categoryTypeById.get(categoryId);
       const normalized =
@@ -1261,7 +776,135 @@ export async function getBudgetSummaryVsActual(
         actual: acc.actual + category.actual_amount,
         variance: acc.variance + category.variance,
       }),
-      { planned: 0, actual: 0, variance: 0 }
+      { planned: 0, actual: 0, variance: 0 },
+    );
+
+    return {
+      data: {
+        totals,
+        categories: categorySummary,
+      },
+    };
+  } catch {
+    return { error: "Error al obtener resumen plan vs real" };
+  }
+}
+
+export async function getBudgetSummaryVsActualForRange(
+  startMonthId: string,
+  endMonthId: string,
+): Promise<ActionResult<BudgetSummaryVsActual>> {
+  const monthsResult = await getMonthsInRange(startMonthId, endMonthId);
+  if ("error" in monthsResult) return monthsResult;
+  const monthIds = monthsResult.data.map((m) => m.id);
+  if (monthIds.length === 0) {
+    return {
+      data: {
+        totals: { planned: 0, actual: 0, variance: 0 },
+        categories: [],
+      },
+    };
+  }
+
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+    const { data: categories, error: categoriesError } = await supabase
+      .from("budget_categories")
+      .select("id, name, category_type, display_order")
+      .eq("user_id", userId)
+      .order("display_order", { ascending: true })
+      .order("name", { ascending: true });
+    if (categoriesError) return { error: categoriesError.message };
+
+    const { data: lines, error: linesError } = await supabase
+      .from("budget_lines")
+      .select("id, category_id")
+      .eq("user_id", userId);
+    if (linesError) return { error: linesError.message };
+
+    const lineIds = (lines ?? []).map((line) => line.id);
+    const lineToCategory = new Map(
+      (lines ?? []).map((line) => [line.id, line.category_id]),
+    );
+
+    const plannedByCategory = new Map<string, number>();
+    if (lineIds.length > 0) {
+      const { data: plans, error: plansError } = await supabase
+        .from("budget_month_plans")
+        .select("line_id, planned_amount")
+        .in("month_id", monthIds)
+        .in("line_id", lineIds);
+      if (plansError) return { error: plansError.message };
+
+      for (const plan of plans ?? []) {
+        const categoryId = lineToCategory.get(plan.line_id);
+        if (!categoryId) continue;
+        const current = plannedByCategory.get(categoryId) ?? 0;
+        plannedByCategory.set(
+          categoryId,
+          current + Number(plan.planned_amount),
+        );
+      }
+    }
+
+    const { data: txRows, error: txError } = await supabase
+      .from("transactions")
+      .select(
+        `
+        category_id,
+        transaction_amounts ( base_amount )
+      `,
+      )
+      .eq("user_id", userId)
+      .in("month_id", monthIds)
+      .not("category_id", "is", null)
+      .neq("transaction_type", "transfer");
+    if (txError) return { error: txError.message };
+
+    const categoryTypeById = new Map(
+      (categories ?? []).map((category) => [
+        category.id,
+        category.category_type,
+      ]),
+    );
+    const actualByCategory = new Map<string, number>();
+    for (const row of txRows ?? []) {
+      const categoryId = row.category_id as string | null;
+      if (!categoryId) continue;
+      const sumBase = (row.transaction_amounts ?? []).reduce(
+        (acc, amountRow) => acc + Number(amountRow.base_amount),
+        0,
+      );
+      const categoryType = categoryTypeById.get(categoryId);
+      const normalized =
+        categoryType === "income" ? sumBase : Math.abs(sumBase);
+      const current = actualByCategory.get(categoryId) ?? 0;
+      actualByCategory.set(categoryId, current + normalized);
+    }
+
+    const categorySummary = (categories ?? []).map((category) => {
+      const planned = plannedByCategory.get(category.id) ?? 0;
+      const actual = actualByCategory.get(category.id) ?? 0;
+      return {
+        category_id: category.id,
+        category_name: category.name,
+        category_type: category.category_type,
+        planned_amount: planned,
+        actual_amount: actual,
+        variance: planned - actual,
+      };
+    });
+
+    const totals = categorySummary.reduce(
+      (acc, category) => ({
+        planned: acc.planned + category.planned_amount,
+        actual: acc.actual + category.actual_amount,
+        variance: acc.variance + category.variance,
+      }),
+      { planned: 0, actual: 0, variance: 0 },
     );
 
     return {

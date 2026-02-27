@@ -35,10 +35,6 @@ export interface BudgetCategory {
   updated_at: string;
 }
 
-export const BUDGET_RULE_MODES = ["set", "add"] as const;
-
-export type BudgetRuleMode = (typeof BUDGET_RULE_MODES)[number];
-
 export interface BudgetLine {
   id: string;
   user_id: string;
@@ -65,23 +61,6 @@ export interface BudgetLineWithPlan extends BudgetLine {
   month_id: string;
   plan_id: string | null;
   planned_amount: number;
-}
-
-export interface BudgetRecurrenceRule {
-  id: string;
-  line_id: string;
-  start_month_id: string;
-  end_month_id: string | null;
-  mode: BudgetRuleMode;
-  amount: number;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface BudgetRecurrenceRuleWithLine extends BudgetRecurrenceRule {
-  line_name: string;
-  category_name: string;
 }
 
 export interface BudgetCategorySummary {

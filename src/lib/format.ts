@@ -60,3 +60,13 @@ export function formatMoneyInput(value: string): string {
   if (parsed == null) return "";
   return formatAmount(parsed);
 }
+
+/** Hex colors for each budget category type, used across charts. */
+export const CATEGORY_COLORS: Record<string, string> = {
+  income: "#16a34a",
+  essential_expenses: "#dc2626",
+  discretionary_expenses: "#ea580c",
+  debt_payments: "#e11d48",
+  savings: "#0891b2",
+  investments: "#4f46e5",
+};

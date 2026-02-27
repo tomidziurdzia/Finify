@@ -111,25 +111,6 @@ export default function BudgetPage() {
     return map;
   }, [lines]);
 
-  const linesByCategoryId = useMemo(() => {
-    const map = new Map<string, BudgetLineWithPlan[]>();
-    for (const line of lines ?? []) {
-      const current = map.get(line.category_id) ?? [];
-      current.push(line);
-      map.set(line.category_id, current);
-    }
-    for (const [key, value] of map.entries()) {
-      map.set(
-        key,
-        value.sort(
-          (a, b) =>
-            a.display_order - b.display_order || a.name.localeCompare(b.name),
-        ),
-      );
-    }
-    return map;
-  }, [lines]);
-
   const summaryByCategoryId = useMemo(() => {
     const map = new Map<
       string,

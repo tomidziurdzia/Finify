@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getTransactions,
+  getTransactionsForRange,
   getBaseCurrency,
   createTransaction,
   createTransfer,
@@ -15,6 +16,8 @@ import { toast } from "sonner";
 const TRANSACTION_KEYS = {
   all: ["transactions"] as const,
   list: (monthId: string) => ["transactions", monthId] as const,
+  range: (start: string, end: string) =>
+    ["transactions", "range", start, end] as const,
 };
 
 export function useBaseCurrency() {
@@ -36,6 +39,24 @@ export function useTransactions(monthId: string | null) {
     queryFn: async () => {
       if (!monthId) return [];
       const result = await getTransactions(monthId);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useTransactionsForRange(
+  startMonthId: string | null,
+  endMonthId: string | null
+) {
+  return useQuery({
+    queryKey: TRANSACTION_KEYS.range(startMonthId ?? "", endMonthId ?? ""),
+    enabled: !!startMonthId && !!endMonthId,
+    queryFn: async () => {
+      if (!startMonthId || !endMonthId) return [];
+      const result = await getTransactionsForRange(startMonthId, endMonthId);
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
