@@ -24,12 +24,15 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
 import { useBudgetCategories } from "@/hooks/useBudget";
+import { BUDGET_CATEGORY_LABELS, type BudgetCategoryType } from "@/types/budget";
 import {
   useCreateTransaction,
   useUpdateTransaction,
@@ -113,6 +116,28 @@ export function TransactionDialog({
   const selectedAccount = activeAccounts.find((a) => a.id === watchAccountId);
 
   const showCategory = watchTransactionType !== "transfer";
+
+  // Filter categories by transaction type
+  const filteredCategories = (() => {
+    const all = categories ?? [];
+    if (watchTransactionType === "income") {
+      return all.filter((c) => c.category_type === "income");
+    }
+    if (watchTransactionType === "expense") {
+      return all.filter((c) => c.category_type !== "income");
+    }
+    // correction → all categories
+    return all;
+  })();
+
+  // Group filtered categories by category_type for the Select
+  const groupedCategories = filteredCategories.reduce<
+    Record<BudgetCategoryType, typeof filteredCategories>
+  >((acc, cat) => {
+    if (!acc[cat.category_type]) acc[cat.category_type] = [];
+    acc[cat.category_type].push(cat);
+    return acc;
+  }, {} as Record<BudgetCategoryType, typeof filteredCategories>);
 
   // Track whether the user manually edited base_amount
   const baseManuallyEdited = useRef(false);
@@ -397,7 +422,11 @@ export function TransactionDialog({
                     <FormControl>
                       <Select
                         value={field.value}
-                        onValueChange={field.onChange}
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          // Clear category when switching type (selected one may not belong to new type)
+                          form.setValue("category_id", "");
+                        }}
                         disabled={isPending || isEditing}
                       >
                         <SelectTrigger className="w-full">
@@ -467,11 +496,20 @@ export function TransactionDialog({
                           <SelectValue placeholder="Seleccionar categoría" />
                         </SelectTrigger>
                         <SelectContent>
-                          {(categories ?? []).map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.name}
-                            </SelectItem>
-                          ))}
+                          {Object.entries(groupedCategories).map(
+                            ([type, cats]) => (
+                              <SelectGroup key={type}>
+                                <SelectLabel>
+                                  {BUDGET_CATEGORY_LABELS[type as BudgetCategoryType]}
+                                </SelectLabel>
+                                {cats.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>
+                                    {c.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            ),
+                          )}
                         </SelectContent>
                       </Select>
                     </FormControl>
