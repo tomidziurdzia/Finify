@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Dialog,
   DialogContent,
@@ -34,14 +33,18 @@ import {
   useCreateAccount,
   useUpdateAccount,
   useCurrencies,
+  useAccountInitialBalance,
 } from "@/hooks/useAccounts";
-import { CreateAccountSchema } from "@/lib/validations/account.schema";
+import { useBaseCurrency } from "@/hooks/useTransactions";
+import { CreateAccountSchema, UpdateAccountSchema } from "@/lib/validations/account.schema";
+import { formatNumberInput, parseNumberInput } from "@/lib/utils";
+import { fetchExchangeRate } from "@/lib/frankfurter";
 import {
   ACCOUNT_TYPES,
   ACCOUNT_TYPE_LABELS,
 } from "@/types/accounts";
 import type { Account } from "@/types/accounts";
-import type { z } from "zod";
+import { Loader2 } from "lucide-react";
 
 interface AccountDialogProps {
   account: Account | null;
@@ -49,7 +52,15 @@ interface AccountDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type AccountFormValues = z.infer<typeof CreateAccountSchema>;
+type AccountFormValues = {
+  name: string;
+  account_type: Account["account_type"];
+  currency: string;
+  notes: string;
+  initial_amount: string;
+  exchange_rate: string;
+  base_amount: string;
+};
 
 export function AccountDialog({
   account,
@@ -59,28 +70,97 @@ export function AccountDialog({
   const isEditing = !!account;
 
   const form = useForm<AccountFormValues>({
-    resolver: zodResolver(CreateAccountSchema),
     defaultValues: {
       name: "",
       account_type: "bank",
       currency: "USD",
       notes: "",
+      initial_amount: "",
+      exchange_rate: "1",
+      base_amount: "",
     },
   });
 
   const { data: currencies } = useCurrencies();
+  const { data: baseCurrency } = useBaseCurrency();
+  const { data: initialBalance } = useAccountInitialBalance(
+    isEditing ? account?.id : undefined,
+  );
   const createMutation = useCreateAccount();
   const updateMutation = useUpdateAccount();
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
+  const [fetchingRate, setFetchingRate] = useState(false);
+  const baseManuallyEdited = useRef(false);
+
+  const watchCurrency = form.watch("currency");
+
+  // Shared helper: fetch FX rate and update form fields
+  const applyFxRate = async (currency: string) => {
+    if (!baseCurrency || currency === baseCurrency) {
+      form.setValue("exchange_rate", "1");
+      baseManuallyEdited.current = false;
+      const amt = parseNumberInput(form.getValues("initial_amount"));
+      if (!isNaN(amt) && amt > 0) {
+        form.setValue(
+          "base_amount",
+          formatNumberInput(String(amt).replace(".", ",")),
+        );
+      }
+      return;
+    }
+
+    setFetchingRate(true);
+    const rate = await fetchExchangeRate(currency, baseCurrency);
+    setFetchingRate(false);
+
+    if (rate !== null) {
+      form.setValue(
+        "exchange_rate",
+        formatNumberInput(String(rate).replace(".", ",")),
+      );
+      baseManuallyEdited.current = false;
+      const amt = parseNumberInput(form.getValues("initial_amount"));
+      if (!isNaN(amt) && amt > 0) {
+        const base = Math.round(amt * rate * 100) / 100;
+        form.setValue(
+          "base_amount",
+          formatNumberInput(String(base).replace(".", ",")),
+        );
+      }
+    }
+  };
+
+  // Called when user manually changes currency in the Select
+  const handleCurrencyChange = (newCurrency: string) => {
+    form.setValue("currency", newCurrency);
+    applyFxRate(newCurrency);
+  };
+
+  // Sync form when account or initialBalance changes
   useEffect(() => {
+    if (!open) return;
+
     if (account) {
+      const openingAmount = initialBalance?.opening_amount ?? 0;
+      const openingBase = initialBalance?.opening_base_amount ?? 0;
+      const rate = openingAmount > 0 ? openingBase / openingAmount : 1;
+
       form.reset({
         name: account.name,
         account_type: account.account_type,
         currency: account.currency,
         notes: account.notes ?? "",
+        initial_amount:
+          openingAmount > 0
+            ? formatNumberInput(String(openingAmount).replace(".", ","))
+            : "",
+        exchange_rate: formatNumberInput(String(rate).replace(".", ",")),
+        base_amount:
+          openingBase > 0
+            ? formatNumberInput(String(openingBase).replace(".", ","))
+            : "",
       });
     } else {
       form.reset({
@@ -88,19 +168,141 @@ export function AccountDialog({
         account_type: "bank",
         currency: "USD",
         notes: "",
+        initial_amount: "",
+        exchange_rate: "1",
+        base_amount: "",
       });
     }
-  }, [account, open, form]);
+    baseManuallyEdited.current = false;
+  }, [account, open, initialBalance, form]);
+
+  // Auto-fetch FX rate when dialog opens with a non-base currency
+  useEffect(() => {
+    if (!open || !baseCurrency) return;
+
+    const currency = form.getValues("currency");
+    if (!currency || currency === baseCurrency) return;
+
+    // In edit mode, skip if we have a valid rate from DB
+    if (isEditing) {
+      const openingAmount = initialBalance?.opening_amount ?? 0;
+      if (openingAmount > 0) return; // rate was calculated from stored data
+    }
+
+    applyFxRate(currency);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, baseCurrency, isEditing, initialBalance]);
+
+  const handleInitialAmountChange = (val: string) => {
+    const formatted = formatNumberInput(val);
+    form.setValue("initial_amount", formatted);
+    const amt = parseNumberInput(formatted);
+    if (baseManuallyEdited.current) {
+      const base = parseNumberInput(form.getValues("base_amount"));
+      if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
+        const newRate = Math.round((base / amt) * 100000000) / 100000000;
+        form.setValue(
+          "exchange_rate",
+          formatNumberInput(String(newRate).replace(".", ",")),
+        );
+      }
+    } else {
+      const rate = parseNumberInput(form.getValues("exchange_rate"));
+      if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
+        const newBase = Math.round(amt * rate * 100) / 100;
+        form.setValue(
+          "base_amount",
+          formatNumberInput(String(newBase).replace(".", ",")),
+        );
+      }
+    }
+  };
+
+  const handleRateChange = (val: string) => {
+    const formatted = formatNumberInput(val);
+    form.setValue("exchange_rate", formatted);
+    baseManuallyEdited.current = false;
+    const amt = parseNumberInput(form.getValues("initial_amount"));
+    const rate = parseNumberInput(formatted);
+    if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
+      const newBase = Math.round(amt * rate * 100) / 100;
+      form.setValue(
+        "base_amount",
+        formatNumberInput(String(newBase).replace(".", ",")),
+      );
+    }
+  };
+
+  const handleBaseAmountChange = (val: string) => {
+    baseManuallyEdited.current = true;
+    const formatted = formatNumberInput(val);
+    form.setValue("base_amount", formatted);
+    const amt = parseNumberInput(form.getValues("initial_amount"));
+    const base = parseNumberInput(formatted);
+    if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
+      const newRate = Math.round((base / amt) * 100000000) / 100000000;
+      form.setValue(
+        "exchange_rate",
+        formatNumberInput(String(newRate).replace(".", ",")),
+      );
+    }
+  };
 
   const onSubmit = async (values: AccountFormValues) => {
+    form.clearErrors();
+
+    const initialAmountNum = parseNumberInput(values.initial_amount);
+    const rateNum = parseNumberInput(values.exchange_rate);
+    const baseAmountNum = parseNumberInput(values.base_amount);
+
+    const balanceFields = {
+      initial_amount: isNaN(initialAmountNum) ? undefined : Math.abs(initialAmountNum),
+      exchange_rate: isNaN(rateNum) ? 1 : rateNum,
+      base_amount: isNaN(baseAmountNum) ? undefined : Math.abs(baseAmountNum),
+    };
+
     try {
       if (isEditing) {
-        await updateMutation.mutateAsync({
+        const parsed = UpdateAccountSchema.safeParse({
           id: account.id,
-          ...values,
+          name: values.name,
+          account_type: values.account_type,
+          currency: values.currency,
+          notes: values.notes,
+          ...balanceFields,
         });
+        if (!parsed.success) {
+          for (const issue of parsed.error.issues) {
+            const field = issue.path[0];
+            if (field && typeof field === "string") {
+              form.setError(field as keyof AccountFormValues, {
+                message: issue.message,
+              });
+            }
+          }
+          return;
+        }
+        await updateMutation.mutateAsync(parsed.data);
       } else {
-        await createMutation.mutateAsync(values);
+        const parsed = CreateAccountSchema.safeParse({
+          name: values.name,
+          account_type: values.account_type,
+          currency: values.currency,
+          notes: values.notes,
+          ...balanceFields,
+        });
+        if (!parsed.success) {
+          for (const issue of parsed.error.issues) {
+            const field = issue.path[0];
+            if (field && typeof field === "string") {
+              form.setError(field as keyof AccountFormValues, {
+                message: issue.message,
+              });
+            }
+          }
+          return;
+        }
+        await createMutation.mutateAsync(parsed.data);
       }
       onOpenChange(false);
     } catch {
@@ -111,6 +313,9 @@ export function AccountDialog({
   const fiatCurrencies = currencies?.filter((c) => c.currency_type === "fiat") ?? [];
   const cryptoCurrencies = currencies?.filter((c) => c.currency_type === "crypto") ?? [];
   const etfCurrencies = currencies?.filter((c) => c.currency_type === "etf") ?? [];
+
+  const selectedCurrency = watchCurrency;
+  const showConversion = baseCurrency && selectedCurrency && selectedCurrency !== baseCurrency;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -184,7 +389,7 @@ export function AccountDialog({
                   <FormControl>
                     <Select
                       value={field.value}
-                      onValueChange={field.onChange}
+                      onValueChange={handleCurrencyChange}
                       disabled={isPending}
                     >
                       <SelectTrigger className="w-full">
@@ -228,6 +433,84 @@ export function AccountDialog({
                 </FormItem>
               )}
             />
+
+            {/* Saldo inicial */}
+            <div className={`grid gap-4 ${showConversion ? "grid-cols-3" : "grid-cols-1"}`}>
+              <FormField
+                control={form.control}
+                name="initial_amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Saldo inicial
+                      {selectedCurrency ? ` (${selectedCurrency})` : ""}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        disabled={isPending}
+                        value={field.value}
+                        onChange={(e) => handleInitialAmountChange(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              {showConversion && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="exchange_rate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          Tipo de cambio
+                          {fetchingRate && (
+                            <Loader2 className="ml-1 inline size-3 animate-spin" />
+                          )}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="1"
+                            disabled={isPending}
+                            value={field.value}
+                            onChange={(e) => handleRateChange(e.target.value)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="base_amount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          Monto base{baseCurrency ? ` (${baseCurrency})` : ""}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0,00"
+                            disabled={isPending}
+                            value={field.value}
+                            onChange={(e) => handleBaseAmountChange(e.target.value)}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+            </div>
 
             <FormField
               control={form.control}

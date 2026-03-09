@@ -22,6 +22,28 @@ export function AccountBalances({
   baseCurrencyCode,
   baseCurrencySymbol,
 }: AccountBalancesProps) {
+  const cryptoCodes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          balances
+            .map((b) => b.currencyCode)
+            .filter((code) => ["BTC", "ETH", "SOL", "ADA"].includes(code)),
+        ),
+      ),
+    [balances],
+  );
+
+  const { data: cryptoPrices } = useQuery({
+    queryKey: ["crypto-prices", baseCurrencyCode, cryptoCodes],
+    enabled: !!baseCurrencyCode && cryptoCodes.length > 0,
+    queryFn: async () => {
+      if (!baseCurrencyCode || cryptoCodes.length === 0) return {};
+      return fetchCryptoPrices(cryptoCodes, baseCurrencyCode);
+    },
+    staleTime: 60_000,
+  });
+
   if (!selectedMonth) return null;
 
   const isRange =
@@ -35,30 +57,6 @@ export function AccountBalances({
     : "Inicio y cierre del mes seleccionado.";
   const labelInicio = isRange ? "Inicio del período" : "Inicio del mes";
   const labelCierre = isRange ? "Cierre del período" : "Final del mes";
-
-  const cryptoCodes = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          balances
-            .map((b) => b.currencyCode)
-            .filter((code) => ["BTC", "ETH", "SOL", "ADA"].includes(code)),
-        ),
-      ),
-    [balances],
-  );
-
-  const { data: cryptoPrices } = useQuery(
-    {
-      queryKey: ["crypto-prices", baseCurrencyCode, cryptoCodes],
-      enabled: !!baseCurrencyCode && cryptoCodes.length > 0,
-      queryFn: async () => {
-        if (!baseCurrencyCode || cryptoCodes.length === 0) return {};
-        return fetchCryptoPrices(cryptoCodes, baseCurrencyCode);
-      },
-      staleTime: 60_000,
-    },
-  );
 
   return (
     <div className="rounded-md border p-3 sm:p-4">

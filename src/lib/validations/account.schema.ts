@@ -18,6 +18,9 @@ export const CreateAccountSchema = z.object({
     .optional()
     .or(z.literal(""))
     .transform((v) => v || null),
+  initial_amount: z.number().min(0, "El saldo no puede ser negativo").optional(),
+  exchange_rate: z.number().positive("El tipo de cambio debe ser positivo").optional(),
+  base_amount: z.number().min(0, "El saldo base no puede ser negativo").optional(),
 });
 
 export const UpdateAccountSchema = CreateAccountSchema.partial().extend({

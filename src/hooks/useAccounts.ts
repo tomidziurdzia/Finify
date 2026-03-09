@@ -7,6 +7,7 @@ import {
   createAccount,
   updateAccount,
   deleteAccount,
+  getAccountInitialBalance,
 } from "@/actions/accounts";
 import type { CreateAccountInput, UpdateAccountInput } from "@/lib/validations/account.schema";
 import { toast } from "sonner";
@@ -44,6 +45,7 @@ export function useCreateAccount() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opening-balances"] });
       toast.success("Cuenta creada correctamente");
     },
     onError: (error: Error) => {
@@ -62,11 +64,27 @@ export function useUpdateAccount() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opening-balances"] });
+      queryClient.invalidateQueries({ queryKey: ["accountInitialBalance"] });
       toast.success("Cuenta actualizada correctamente");
     },
     onError: (error: Error) => {
       toast.error(error.message);
     },
+  });
+}
+
+export function useAccountInitialBalance(accountId: string | undefined) {
+  return useQuery({
+    queryKey: ["accountInitialBalance", accountId],
+    enabled: !!accountId,
+    queryFn: async () => {
+      if (!accountId) return null;
+      const result = await getAccountInitialBalance(accountId);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 30_000,
   });
 }
 
