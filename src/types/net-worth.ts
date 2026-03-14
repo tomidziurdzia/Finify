@@ -56,3 +56,55 @@ export interface NwMonthSummary {
     currency_symbol: string;
   }[];
 }
+
+export interface NwYearSummary {
+  year: number;
+  total_assets: number;
+  total_liabilities: number;
+  net_worth: number;
+  items: {
+    item_id: string;
+    item_name: string;
+    side: NwItemSide;
+    amount: number;
+    amount_base: number | null;
+    snapshot_month: number;
+    currency: string;
+    currency_symbol: string;
+  }[];
+}
+
+export interface AccountNetWorthSummary {
+  year: number;
+  month: number;
+  total: number;
+  accounts: {
+    id: string;
+    name: string;
+    account_type: string;
+    currency: string;
+    currency_symbol: string;
+    balance: number;
+    balance_base: number;
+  }[];
+}
+
+export interface LiabilitiesSummary {
+  year: number;
+  total: number;
+  items: {
+    item_id: string;
+    name: string;
+    currency: string;
+    currency_symbol: string;
+    amount: number;
+    amount_base: number | null;
+  }[];
+}
+
+export interface NetWorthEvolutionPoint {
+  month: number;
+  assets: number;
+  liabilities: number;
+  netWorth: number;
+}

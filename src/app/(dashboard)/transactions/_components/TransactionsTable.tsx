@@ -19,6 +19,7 @@ import {
   Trash2,
   ArrowLeftRight,
   ArrowUpDown,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -142,6 +143,11 @@ export function TransactionsTable() {
 
   const selectedMonth =
     sortedMonths.find((month) => month.id === selectedMonthId) ?? null;
+
+  const isClosedMonth =
+    selectedMonthId != null &&
+    sortedMonths.length > 0 &&
+    selectedMonthId !== sortedMonths[0].id;
 
   const {
     data: transactions,
@@ -301,6 +307,8 @@ export function TransactionsTable() {
                 variant="ghost"
                 size="icon"
                 onClick={() => handleEdit(tx)}
+                disabled={isClosedMonth}
+                title={isClosedMonth ? "Mes cerrado" : "Editar"}
               >
                 <Pencil className="size-4" />
               </Button>
@@ -308,6 +316,8 @@ export function TransactionsTable() {
                 variant="ghost"
                 size="icon"
                 onClick={() => setDeletingTx(tx)}
+                disabled={isClosedMonth}
+                title={isClosedMonth ? "Mes cerrado" : "Eliminar"}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -445,9 +455,10 @@ export function TransactionsTable() {
               <SelectValue placeholder="Seleccionar mes" />
             </SelectTrigger>
             <SelectContent>
-              {sortedMonths.map((month) => (
+              {sortedMonths.map((month, idx) => (
                 <SelectItem key={month.id} value={month.id}>
                   {MONTH_NAMES[month.month - 1]} {month.year}
+                  {idx > 0 ? " 🔒" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -466,7 +477,7 @@ export function TransactionsTable() {
             onClick={handleCreateTransfer}
             size="sm"
             variant="outline"
-            disabled={!selectedMonthId}
+            disabled={!selectedMonthId || isClosedMonth}
           >
             <ArrowLeftRight className="mr-1 size-4" />
             Transferencia
@@ -474,7 +485,7 @@ export function TransactionsTable() {
           <Button
             onClick={handleCreateTx}
             size="sm"
-            disabled={!selectedMonthId}
+            disabled={!selectedMonthId || isClosedMonth}
           >
             <Plus className="mr-1 size-4" />
             Nueva transacción
@@ -485,7 +496,18 @@ export function TransactionsTable() {
       {selectedMonth && (
         <p className="text-lg font-semibold">
           {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
+          {isClosedMonth && (
+            <Lock className="ml-2 inline-block size-4 text-amber-600" />
+          )}
         </p>
+      )}
+
+      {isClosedMonth && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <Lock className="mr-2 inline-block size-4" />
+          Este mes está cerrado. Para corregir, creá una transacción de
+          corrección en el mes actual.
+        </div>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -749,7 +771,7 @@ export function TransactionsTable() {
                       onClick={handleCreateTx}
                       variant="outline"
                       size="sm"
-                      disabled={!selectedMonthId}
+                      disabled={!selectedMonthId || isClosedMonth}
                     >
                       <Plus className="mr-1 size-4" />
                       Crear transacción

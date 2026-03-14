@@ -64,6 +64,41 @@ export async function getMonths(): Promise<ActionResult<Month[]>> {
   }
 }
 
+/**
+ * A month is "closed" when a later month exists for the same user.
+ * Closed months cannot have transactions created/edited/deleted.
+ */
+export async function isMonthClosed(
+  monthId: string
+): Promise<ActionResult<boolean>> {
+  try {
+    const supabase = await createClient();
+    const { data: month, error: monthError } = await supabase
+      .from("months")
+      .select("year, month, user_id")
+      .eq("id", monthId)
+      .maybeSingle();
+
+    if (monthError) return { error: monthError.message };
+    if (!month) return { data: false };
+
+    const { data: laterMonth } = await supabase
+      .from("months")
+      .select("id")
+      .eq("user_id", month.user_id)
+      .or(
+        `year.gt.${month.year},and(year.eq.${month.year},month.gt.${month.month})`
+      )
+      .limit(1)
+      .maybeSingle();
+
+    return { data: laterMonth !== null };
+  } catch (e) {
+    console.error("isMonthClosed:", e);
+    return { error: "Error al verificar estado del mes" };
+  }
+}
+
 export async function getOrCreateCurrentMonth(): Promise<ActionResult<Month>> {
   const now = new Date();
   return createMonth(now.getFullYear(), now.getMonth() + 1);

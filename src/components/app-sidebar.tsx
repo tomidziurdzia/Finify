@@ -14,6 +14,7 @@ import {
   Wallet,
   Layers,
   ArrowLeftRight,
+  CreditCard,
 } from "lucide-react";
 import {
   Sidebar,
@@ -167,6 +168,12 @@ export function AppSidebar() {
                 icon={Landmark}
                 label="Cuentas"
                 active={pathname.startsWith("/accounts")}
+              />
+              <CollapsedDropdownItem
+                href="/debts"
+                icon={CreditCard}
+                label="Deudas"
+                active={pathname.startsWith("/debts")}
               />
               <CollapsedDropdownItem
                 href="/net-worth"

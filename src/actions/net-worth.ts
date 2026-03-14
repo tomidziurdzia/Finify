@@ -10,7 +10,11 @@ import type {
   NwItem,
   NwItemWithRelations,
   NwMonthSummary,
+  NwYearSummary,
   NwSnapshot,
+  AccountNetWorthSummary,
+  LiabilitiesSummary,
+  NetWorthEvolutionPoint,
 } from "@/types/net-worth";
 
 type ActionResult<T> = { data: T } | { error: string };
@@ -251,6 +255,114 @@ export async function getNwSnapshotsForMonth(
   }
 }
 
+export async function getNwSnapshotsForYear(
+  year: number
+): Promise<ActionResult<NwYearSummary>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+    const { data: items, error: itemsError } = await supabase
+      .from("nw_items")
+      .select(
+        `
+        id, name, side, currency,
+        currencies ( symbol )
+      `
+      )
+      .eq("user_id", userId)
+      .order("display_order", { ascending: true })
+      .order("side", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (itemsError) return { error: itemsError.message };
+
+    const itemIds = (items ?? []).map((i) => i.id);
+    let snapshots: {
+      nw_item_id: string;
+      month: number;
+      amount: number;
+      amount_base: number | null;
+    }[] = [];
+
+    if (itemIds.length > 0) {
+      // Fetch ALL snapshots for this year, then pick the latest month per item
+      const { data: snap, error: snapError } = await supabase
+        .from("nw_snapshots")
+        .select("nw_item_id, month, amount, amount_base")
+        .in("nw_item_id", itemIds)
+        .eq("year", year)
+        .order("month", { ascending: false });
+
+      if (snapError) return { error: snapError.message };
+      snapshots = (snap ?? []).map((s) => ({
+        nw_item_id: s.nw_item_id,
+        month: s.month,
+        amount: Number(s.amount),
+        amount_base: s.amount_base != null ? Number(s.amount_base) : null,
+      }));
+    }
+
+    // Keep only the latest month snapshot per item
+    const snapByItem = new Map<
+      string,
+      { month: number; amount: number; amount_base: number | null }
+    >();
+    for (const s of snapshots) {
+      if (!snapByItem.has(s.nw_item_id)) {
+        snapByItem.set(s.nw_item_id, s);
+      }
+    }
+
+    let totalAssets = 0;
+    let totalLiabilities = 0;
+
+    const summaryItems = (items ?? []).map((item) => {
+      const snap = snapByItem.get(item.id);
+      const amount = snap?.amount ?? 0;
+      const amountBase = snap?.amount_base ?? null;
+      const snapshotMonth = snap?.month ?? 0;
+      const currencyRaw = item.currencies;
+      const currency = Array.isArray(currencyRaw)
+        ? currencyRaw[0]
+        : currencyRaw;
+      const symbol =
+        (currency as { symbol?: string })?.symbol ?? item.currency;
+
+      const valueForTotal = amountBase ?? amount;
+      if (item.side === "asset") {
+        totalAssets += valueForTotal;
+      } else {
+        totalLiabilities += valueForTotal;
+      }
+
+      return {
+        item_id: item.id,
+        item_name: item.name,
+        side: item.side,
+        amount,
+        amount_base: amountBase,
+        snapshot_month: snapshotMonth,
+        currency: item.currency,
+        currency_symbol: symbol,
+      };
+    });
+
+    return {
+      data: {
+        year,
+        total_assets: totalAssets,
+        total_liabilities: totalLiabilities,
+        net_worth: totalAssets - totalLiabilities,
+        items: summaryItems,
+      },
+    };
+  } catch {
+    return { error: "Error al obtener snapshots anuales de patrimonio" };
+  }
+}
+
 export async function upsertNwSnapshot(
   input: unknown
 ): Promise<ActionResult<NwSnapshot>> {
@@ -298,5 +410,344 @@ export async function upsertNwSnapshot(
     };
   } catch {
     return { error: "Error al guardar snapshot de patrimonio" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Patrimonio neto automático — calculado desde saldos de cuentas      */
+/* ------------------------------------------------------------------ */
+
+export async function getAccountNetWorth(
+  year: number
+): Promise<ActionResult<AccountNetWorthSummary>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    // 1. Encontrar el último mes del año seleccionado
+    const { data: latestMonth, error: monthError } = await supabase
+      .from("months")
+      .select("id, year, month")
+      .eq("user_id", userId)
+      .eq("year", year)
+      .order("month", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (monthError) return { error: monthError.message };
+
+    if (!latestMonth) {
+      return {
+        data: { year, month: 0, total: 0, accounts: [] },
+      };
+    }
+
+    // 2. Obtener cuentas activas con símbolo de moneda
+    const { data: accounts, error: accError } = await supabase
+      .from("accounts")
+      .select(
+        `
+        id, name, account_type, currency, is_active,
+        currencies ( symbol )
+      `
+      )
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .order("account_type")
+      .order("name");
+
+    if (accError) return { error: accError.message };
+
+    // 3. Opening balances para ese mes
+    const { data: openings, error: obError } = await supabase
+      .from("opening_balances")
+      .select("account_id, opening_amount, opening_base_amount")
+      .eq("month_id", latestMonth.id);
+
+    if (obError) return { error: obError.message };
+
+    // 4. Transacciones del mes → sumar montos por cuenta
+    const { data: txRows, error: txError } = await supabase
+      .from("transactions")
+      .select("transaction_amounts ( account_id, amount, base_amount )")
+      .eq("month_id", latestMonth.id)
+      .eq("user_id", userId);
+
+    if (txError) return { error: txError.message };
+
+    // Acumular movimientos por account_id
+    const movByAccount = new Map<
+      string,
+      { amount: number; base_amount: number }
+    >();
+    for (const tx of txRows ?? []) {
+      const lines = Array.isArray(tx.transaction_amounts)
+        ? tx.transaction_amounts
+        : tx.transaction_amounts
+          ? [tx.transaction_amounts]
+          : [];
+      for (const line of lines) {
+        const cur = movByAccount.get(line.account_id) ?? {
+          amount: 0,
+          base_amount: 0,
+        };
+        cur.amount += Number(line.amount);
+        cur.base_amount += Number(line.base_amount);
+        movByAccount.set(line.account_id, cur);
+      }
+    }
+
+    // 5. Opening balances por cuenta
+    const obByAccount = new Map<
+      string,
+      { opening: number; opening_base: number }
+    >();
+    for (const ob of openings ?? []) {
+      obByAccount.set(ob.account_id, {
+        opening: Number(ob.opening_amount),
+        opening_base: Number(ob.opening_base_amount),
+      });
+    }
+
+    // 6. Calcular saldo de cierre por cuenta
+    let total = 0;
+    const accountResults = (accounts ?? []).map((acc) => {
+      const ob = obByAccount.get(acc.id) ?? { opening: 0, opening_base: 0 };
+      const mov = movByAccount.get(acc.id) ?? { amount: 0, base_amount: 0 };
+
+      const balance = ob.opening + mov.amount;
+      const balanceBase = ob.opening_base + mov.base_amount;
+
+      total += balanceBase;
+
+      const currencyRaw = acc.currencies;
+      const currency = Array.isArray(currencyRaw)
+        ? currencyRaw[0]
+        : currencyRaw;
+      const symbol =
+        (currency as { symbol?: string })?.symbol ?? acc.currency;
+
+      return {
+        id: acc.id,
+        name: acc.name,
+        account_type: acc.account_type,
+        currency: acc.currency,
+        currency_symbol: symbol,
+        balance,
+        balance_base: balanceBase,
+      };
+    });
+
+    return {
+      data: {
+        year,
+        month: latestMonth.month,
+        total,
+        accounts: accountResults,
+      },
+    };
+  } catch {
+    return { error: "Error al calcular patrimonio neto" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Pasivos — último snapshot de cada deuda para un año                  */
+/* ------------------------------------------------------------------ */
+
+export async function getLiabilitiesForYear(
+  year: number
+): Promise<ActionResult<LiabilitiesSummary>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    const { data: items, error: itemsError } = await supabase
+      .from("nw_items")
+      .select("id, name, currency, currencies ( symbol )")
+      .eq("user_id", userId)
+      .eq("side", "liability")
+      .order("name");
+
+    if (itemsError) return { error: itemsError.message };
+
+    const itemIds = (items ?? []).map((i) => i.id);
+    if (itemIds.length === 0) {
+      return { data: { year, total: 0, items: [] } };
+    }
+
+    const { data: snaps, error: snapError } = await supabase
+      .from("nw_snapshots")
+      .select("nw_item_id, month, amount, amount_base")
+      .in("nw_item_id", itemIds)
+      .eq("year", year)
+      .order("month", { ascending: false });
+
+    if (snapError) return { error: snapError.message };
+
+    // Último snapshot por ítem
+    const latestByItem = new Map<
+      string,
+      { amount: number; amount_base: number | null }
+    >();
+    for (const s of snaps ?? []) {
+      if (!latestByItem.has(s.nw_item_id)) {
+        latestByItem.set(s.nw_item_id, {
+          amount: Number(s.amount),
+          amount_base: s.amount_base != null ? Number(s.amount_base) : null,
+        });
+      }
+    }
+
+    let total = 0;
+    const summaryItems = (items ?? []).map((item) => {
+      const snap = latestByItem.get(item.id);
+      const amount = snap?.amount ?? 0;
+      const amountBase = snap?.amount_base ?? null;
+      const currencyRaw = item.currencies;
+      const currency = Array.isArray(currencyRaw)
+        ? currencyRaw[0]
+        : currencyRaw;
+      const symbol =
+        (currency as { symbol?: string })?.symbol ?? item.currency;
+
+      total += amountBase ?? amount;
+
+      return {
+        item_id: item.id,
+        name: item.name,
+        currency: item.currency,
+        currency_symbol: symbol,
+        amount,
+        amount_base: amountBase,
+      };
+    });
+
+    return { data: { year, total, items: summaryItems } };
+  } catch {
+    return { error: "Error al obtener pasivos" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Evolución mensual del patrimonio neto                               */
+/* ------------------------------------------------------------------ */
+
+export async function getNetWorthEvolution(
+  year: number
+): Promise<ActionResult<NetWorthEvolutionPoint[]>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    // 1. Obtener todos los meses del año
+    const { data: monthRows, error: monthsError } = await supabase
+      .from("months")
+      .select("id, month")
+      .eq("user_id", userId)
+      .eq("year", year)
+      .order("month");
+
+    if (monthsError) return { error: monthsError.message };
+    if (!monthRows || monthRows.length === 0) return { data: [] };
+
+    // 2. Obtener cuentas activas
+    const { data: accounts } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("is_active", true);
+
+    const accountIds = (accounts ?? []).map((a) => a.id);
+
+    // 3. Obtener pasivos (nw_items liability) y sus snapshots del año
+    const { data: liabilityItems } = await supabase
+      .from("nw_items")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("side", "liability");
+
+    const liabilityIds = (liabilityItems ?? []).map((i) => i.id);
+    let liabilitySnaps: { nw_item_id: string; month: number; amount: number; amount_base: number | null }[] = [];
+
+    if (liabilityIds.length > 0) {
+      const { data: snaps } = await supabase
+        .from("nw_snapshots")
+        .select("nw_item_id, month, amount, amount_base")
+        .in("nw_item_id", liabilityIds)
+        .eq("year", year)
+        .order("month");
+
+      liabilitySnaps = (snaps ?? []).map((s) => ({
+        nw_item_id: s.nw_item_id,
+        month: s.month,
+        amount: Number(s.amount),
+        amount_base: s.amount_base != null ? Number(s.amount_base) : null,
+      }));
+    }
+
+    // 4. Para cada mes, calcular activos y pasivos
+    const points: NetWorthEvolutionPoint[] = [];
+
+    for (const m of monthRows) {
+      // Activos: opening_balances + transaction_amounts del mes
+      let assets = 0;
+
+      if (accountIds.length > 0) {
+        const { data: openings } = await supabase
+          .from("opening_balances")
+          .select("account_id, opening_base_amount")
+          .eq("month_id", m.id);
+
+        for (const ob of openings ?? []) {
+          assets += Number(ob.opening_base_amount);
+        }
+
+        const { data: txRows } = await supabase
+          .from("transactions")
+          .select("transaction_amounts ( account_id, base_amount )")
+          .eq("month_id", m.id)
+          .eq("user_id", userId);
+
+        for (const tx of txRows ?? []) {
+          const lines = Array.isArray(tx.transaction_amounts)
+            ? tx.transaction_amounts
+            : tx.transaction_amounts
+              ? [tx.transaction_amounts]
+              : [];
+          for (const line of lines) {
+            assets += Number(line.base_amount);
+          }
+        }
+      }
+
+      // Pasivos: último snapshot ≤ este mes para cada liability item
+      let liabilities = 0;
+      for (const itemId of liabilityIds) {
+        const snap = liabilitySnaps
+          .filter((s) => s.nw_item_id === itemId && s.month <= m.month)
+          .pop(); // último por month (ya ordenado asc)
+        if (snap) {
+          liabilities += snap.amount_base ?? snap.amount;
+        }
+      }
+
+      points.push({
+        month: m.month,
+        assets,
+        liabilities,
+        netWorth: assets - liabilities,
+      });
+    }
+
+    return { data: points };
+  } catch {
+    return { error: "Error al calcular evolución de patrimonio" };
   }
 }

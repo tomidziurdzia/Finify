@@ -12,7 +12,7 @@ import type {
   TransactionWithRelations,
   TransactionAmountWithRelations,
 } from "@/types/transactions";
-import { createMonth, getMonthsInRange } from "@/actions/months";
+import { createMonth, getMonthsInRange, isMonthClosed } from "@/actions/months";
 
 type ActionResult<T> = { data: T } | { error: string };
 
@@ -322,6 +322,15 @@ export async function createTransaction(
     const resolvedMonth = await resolveMonthIdFromDate(parsed.data.date);
     if ("error" in resolvedMonth) return { error: resolvedMonth.error };
 
+    const closedCheck = await isMonthClosed(resolvedMonth.data);
+    if ("error" in closedCheck) return { error: closedCheck.error };
+    if (closedCheck.data) {
+      return {
+        error:
+          "Este mes está cerrado. Creá una corrección en el mes actual.",
+      };
+    }
+
     const amountLines = parsed.data.amounts;
     const accountIds = [...new Set(amountLines.map((line) => line.account_id))];
     const { data: accounts, error: accountError } = await supabase
@@ -429,6 +438,15 @@ export async function createTransfer(
     if (!user) return { error: "No autenticado" };
     const resolvedMonth = await resolveMonthIdFromDate(parsed.data.date);
     if ("error" in resolvedMonth) return { error: resolvedMonth.error };
+
+    const closedCheck = await isMonthClosed(resolvedMonth.data);
+    if ("error" in closedCheck) return { error: closedCheck.error };
+    if (closedCheck.data) {
+      return {
+        error:
+          "Este mes está cerrado. Creá una corrección en el mes actual.",
+      };
+    }
 
     // Lookup both accounts and currencies (maybeSingle avoids throwing on 0 rows)
     const { data: sourceAccount } = await supabase
@@ -611,7 +629,7 @@ export async function updateTransaction(
 
     const { data: existing } = await supabase
       .from("transactions")
-      .select("id, transaction_type")
+      .select("id, transaction_type, month_id")
       .eq("id", id)
       .eq("user_id", user.id)
       .single();
@@ -621,11 +639,35 @@ export async function updateTransaction(
       return { error: "No se puede cambiar el tipo de transacción" };
     }
 
+    // Block edits on closed months
+    if (existing.month_id) {
+      const closedCheck = await isMonthClosed(existing.month_id);
+      if ("error" in closedCheck) return { error: closedCheck.error };
+      if (closedCheck.data) {
+        return {
+          error:
+            "Este mes está cerrado. Creá una corrección en el mes actual.",
+        };
+      }
+    }
+
     let nextMonthId: string | undefined;
     if (updates.date) {
       const resolvedMonth = await resolveMonthIdFromDate(updates.date);
       if ("error" in resolvedMonth) return { error: resolvedMonth.error };
       nextMonthId = resolvedMonth.data;
+
+      // Also block if target month is closed
+      if (nextMonthId !== existing.month_id) {
+        const targetClosedCheck = await isMonthClosed(nextMonthId);
+        if ("error" in targetClosedCheck) return { error: targetClosedCheck.error };
+        if (targetClosedCheck.data) {
+          return {
+            error:
+              "El mes destino está cerrado. No se puede mover la transacción.",
+          };
+        }
+      }
     }
 
     const payload = {
@@ -718,6 +760,27 @@ export async function deleteTransaction(
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return { error: "No autenticado" };
+
+    // Fetch month_id to check if the month is closed
+    const { data: tx } = await supabase
+      .from("transactions")
+      .select("month_id")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!tx) return { error: "Transacción no encontrada" };
+
+    if (tx.month_id) {
+      const closedCheck = await isMonthClosed(tx.month_id);
+      if ("error" in closedCheck) return { error: closedCheck.error };
+      if (closedCheck.data) {
+        return {
+          error:
+            "Este mes está cerrado. No se puede eliminar la transacción.",
+        };
+      }
+    }
 
     const { error } = await supabase
       .from("transactions")
