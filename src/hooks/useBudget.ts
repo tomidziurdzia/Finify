@@ -50,6 +50,7 @@ export function useBudgetYears() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -92,6 +93,7 @@ export function useBudgetCategories() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: Infinity,
   });
 }
 
@@ -103,11 +105,41 @@ export function useCreateCategory() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (newCat) => {
+      await queryClient.cancelQueries({ queryKey: BUDGET_KEYS.categories });
+      const previous = queryClient.getQueryData<BudgetCategory[]>(
+        BUDGET_KEYS.categories
+      );
+      queryClient.setQueryData<BudgetCategory[]>(
+        BUDGET_KEYS.categories,
+        (old) => [
+          ...(old ?? []),
+          {
+            id: `temp-${Date.now()}`,
+            user_id: "",
+            category_type: newCat.category_type,
+            name: newCat.name,
+            monthly_amount: newCat.monthly_amount ?? 0,
+            display_order: newCat.display_order ?? 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ]
+      );
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(BUDGET_KEYS.categories, context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
       toast.success("Categoría creada");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+    },
   });
 }
 
@@ -119,11 +151,34 @@ export function useUpdateCategory() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (updatedCat) => {
+      await queryClient.cancelQueries({ queryKey: BUDGET_KEYS.categories });
+      const previous = queryClient.getQueryData<BudgetCategory[]>(
+        BUDGET_KEYS.categories
+      );
+      queryClient.setQueryData<BudgetCategory[]>(
+        BUDGET_KEYS.categories,
+        (old) =>
+          (old ?? []).map((cat) =>
+            cat.id === updatedCat.id
+              ? { ...cat, ...updatedCat, updated_at: new Date().toISOString() }
+              : cat
+          )
+      );
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(BUDGET_KEYS.categories, context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
       toast.success("Categoría actualizada");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+    },
   });
 }
 
@@ -135,11 +190,29 @@ export function useDeleteCategory() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: BUDGET_KEYS.categories });
+      const previous = queryClient.getQueryData<BudgetCategory[]>(
+        BUDGET_KEYS.categories
+      );
+      queryClient.setQueryData<BudgetCategory[]>(
+        BUDGET_KEYS.categories,
+        (old) => (old ?? []).filter((cat) => cat.id !== id)
+      );
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(BUDGET_KEYS.categories, context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
       toast.success("Categoría eliminada");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+    },
   });
 }
 
@@ -153,6 +226,7 @@ export function useBudgetLines(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -164,15 +238,29 @@ export function useCreateBudgetLine(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: BUDGET_KEYS.categories });
       if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
+        await queryClient.cancelQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
       }
-      toast.success("Línea creada");
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Línea creada");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+      if (monthId) {
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.summary(monthId),
+        });
+      }
+    },
   });
 }
 
@@ -184,15 +272,29 @@ export function useUpdateBudgetLine(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: BUDGET_KEYS.categories });
       if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
+        await queryClient.cancelQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
       }
-      toast.success("Línea actualizada");
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Línea actualizada");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.categories });
+      if (monthId) {
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.summary(monthId),
+        });
+      }
+    },
   });
 }
 
@@ -204,14 +306,40 @@ export function useDeleteBudgetLine(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
+    onMutate: async (id) => {
       if (monthId) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
+        await queryClient.cancelQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
+        const previous = queryClient.getQueryData<BudgetLineWithPlan[]>(
+          BUDGET_KEYS.lines(monthId)
+        );
+        queryClient.setQueryData<BudgetLineWithPlan[]>(
+          BUDGET_KEYS.lines(monthId),
+          (old) => (old ?? []).filter((line) => line.id !== id)
+        );
+        return { previous };
       }
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous && monthId) {
+        queryClient.setQueryData(BUDGET_KEYS.lines(monthId), context.previous);
+      }
+      toast.error(_err.message);
+    },
+    onSuccess: () => {
       toast.success("Línea eliminada");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      if (monthId) {
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.summary(monthId),
+        });
+      }
+    },
   });
 }
 
@@ -223,18 +351,53 @@ export function useUpsertBudgetMonthPlan(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(vars.month_id) });
+    onMutate: async (input) => {
+      const targetMonthId = input.month_id;
+      await queryClient.cancelQueries({
+        queryKey: BUDGET_KEYS.lines(targetMonthId),
+      });
+      const previous = queryClient.getQueryData<BudgetLineWithPlan[]>(
+        BUDGET_KEYS.lines(targetMonthId)
+      );
+      queryClient.setQueryData<BudgetLineWithPlan[]>(
+        BUDGET_KEYS.lines(targetMonthId),
+        (old) =>
+          (old ?? []).map((line) =>
+            line.id === input.line_id
+              ? { ...line, planned_amount: input.planned_amount }
+              : line
+          )
+      );
+      return { previous, targetMonthId };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous && context.targetMonthId) {
+        queryClient.setQueryData(
+          BUDGET_KEYS.lines(context.targetMonthId),
+          context.previous
+        );
+      }
+      toast.error(_err.message);
+    },
+    onSuccess: () => {
+      toast.success("Plan mensual actualizado");
+    },
+    onSettled: (_, __, vars) => {
+      queryClient.invalidateQueries({
+        queryKey: BUDGET_KEYS.lines(vars.month_id),
+      });
       queryClient.invalidateQueries({
         queryKey: BUDGET_KEYS.summary(vars.month_id),
       });
       if (monthId && monthId !== vars.month_id) {
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.lines(monthId) });
-        queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.summary(monthId) });
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.lines(monthId),
+        });
+        queryClient.invalidateQueries({
+          queryKey: BUDGET_KEYS.summary(monthId),
+        });
       }
-      toast.success("Plan mensual actualizado");
     },
-    onError: (err: Error) => toast.error(err.message),
   });
 }
 
@@ -281,6 +444,7 @@ export function useBudgetSummary(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 60_000,
   });
 }
 

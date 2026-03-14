@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import {
   Dialog,
@@ -97,7 +97,7 @@ export function AccountDialog({
   const watchCurrency = form.watch("currency");
 
   // Shared helper: fetch FX rate and update form fields
-  const applyFxRate = async (currency: string) => {
+  const applyFxRate = useCallback(async (currency: string) => {
     if (!baseCurrency || currency === baseCurrency) {
       form.setValue("exchange_rate", "1");
       baseManuallyEdited.current = false;
@@ -130,13 +130,13 @@ export function AccountDialog({
         );
       }
     }
-  };
+  }, [form, baseCurrency]);
 
   // Called when user manually changes currency in the Select
-  const handleCurrencyChange = (newCurrency: string) => {
+  const handleCurrencyChange = useCallback((newCurrency: string) => {
     form.setValue("currency", newCurrency);
     applyFxRate(newCurrency);
-  };
+  }, [form, applyFxRate]);
 
   // Sync form when account or initialBalance changes
   useEffect(() => {
@@ -193,7 +193,7 @@ export function AccountDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, baseCurrency, isEditing, initialBalance]);
 
-  const handleInitialAmountChange = (val: string) => {
+  const handleInitialAmountChange = useCallback((val: string) => {
     const formatted = formatNumberInput(val);
     form.setValue("initial_amount", formatted);
     const amt = parseNumberInput(formatted);
@@ -216,9 +216,9 @@ export function AccountDialog({
         );
       }
     }
-  };
+  }, [form]);
 
-  const handleRateChange = (val: string) => {
+  const handleRateChange = useCallback((val: string) => {
     const formatted = formatNumberInput(val);
     form.setValue("exchange_rate", formatted);
     baseManuallyEdited.current = false;
@@ -231,9 +231,9 @@ export function AccountDialog({
         formatNumberInput(String(newBase).replace(".", ",")),
       );
     }
-  };
+  }, [form]);
 
-  const handleBaseAmountChange = (val: string) => {
+  const handleBaseAmountChange = useCallback((val: string) => {
     baseManuallyEdited.current = true;
     const formatted = formatNumberInput(val);
     form.setValue("base_amount", formatted);
@@ -246,7 +246,7 @@ export function AccountDialog({
         formatNumberInput(String(newRate).replace(".", ",")),
       );
     }
-  };
+  }, [form]);
 
   const onSubmit = async (values: AccountFormValues) => {
     form.clearErrors();

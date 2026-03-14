@@ -23,6 +23,7 @@ export function useMonths() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -78,5 +79,6 @@ export function useOpeningBalances(monthId: string | null) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }

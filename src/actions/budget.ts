@@ -687,19 +687,43 @@ export async function getBudgetSummaryVsActual(
     if ("error" in month) return month;
 
     const supabase = await createClient();
-    const { data: categories, error: categoriesError } = await supabase
-      .from("budget_categories")
-      .select("id, name, category_type, display_order")
-      .eq("user_id", userId)
-      .order("display_order", { ascending: true })
-      .order("name", { ascending: true });
-    if (categoriesError) return { error: categoriesError.message };
 
-    const { data: lines, error: linesError } = await supabase
-      .from("budget_lines")
-      .select("id, category_id")
-      .eq("user_id", userId);
-    if (linesError) return { error: linesError.message };
+    // Parallel fetch: categories, lines, and transactions are independent
+    const [categoriesRes, linesRes, txRes] = await Promise.all([
+      supabase
+        .from("budget_categories")
+        .select("id, name, category_type, display_order")
+        .eq("user_id", userId)
+        .order("display_order", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase
+        .from("budget_lines")
+        .select("id, category_id")
+        .eq("user_id", userId),
+      supabase
+        .from("transactions")
+        .select(
+          `
+          date,
+          category_id,
+          transaction_amounts ( amount, original_currency )
+        `,
+        )
+        .eq("user_id", userId)
+        .eq("month_id", monthId)
+        .not("category_id", "is", null)
+        // Transfers are excluded from budget comparison because they move
+        // money between accounts without generating income or expense.
+        .neq("transaction_type", "transfer"),
+    ]);
+
+    if (categoriesRes.error) return { error: categoriesRes.error.message };
+    if (linesRes.error) return { error: linesRes.error.message };
+    if (txRes.error) return { error: txRes.error.message };
+
+    const categories = categoriesRes.data;
+    const lines = linesRes.data;
+    const txRows = txRes.data;
 
     const lineIds = (lines ?? []).map((line) => line.id);
     const lineToCategory = new Map(
@@ -725,23 +749,6 @@ export async function getBudgetSummaryVsActual(
         );
       }
     }
-
-    const { data: txRows, error: txError } = await supabase
-      .from("transactions")
-      .select(
-        `
-        date,
-        category_id,
-        transaction_amounts ( amount, original_currency )
-      `,
-      )
-      .eq("user_id", userId)
-      .eq("month_id", monthId)
-      .not("category_id", "is", null)
-      // Transfers are excluded from budget comparison because they move
-      // money between accounts without generating income or expense.
-      .neq("transaction_type", "transfer");
-    if (txError) return { error: txError.message };
 
     const categoryTypeById = new Map(
       (categories ?? []).map((category) => [

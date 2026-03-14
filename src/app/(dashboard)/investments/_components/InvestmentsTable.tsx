@@ -129,16 +129,25 @@ export function InvestmentsTable() {
   }, [investments, prices]);
 
   // Summary totals
-  const totalInvested = holdings.reduce((s, h) => s + h.total_cost, 0);
-  const totalCurrentValue = holdings.every((h) => h.current_value !== null)
-    ? holdings.reduce((s, h) => s + (h.current_value ?? 0), 0)
-    : null;
-  const totalGainLoss =
-    totalCurrentValue !== null ? totalCurrentValue - totalInvested : null;
-  const totalGainLossPct =
-    totalGainLoss !== null && totalInvested > 0
-      ? (totalGainLoss / totalInvested) * 100
-      : null;
+  const { totalInvested, totalCurrentValue, totalGainLoss, totalGainLossPct } =
+    useMemo(() => {
+      const invested = holdings.reduce((s, h) => s + h.total_cost, 0);
+      const currentValue = holdings.every((h) => h.current_value !== null)
+        ? holdings.reduce((s, h) => s + (h.current_value ?? 0), 0)
+        : null;
+      const gainLoss =
+        currentValue !== null ? currentValue - invested : null;
+      const gainLossPct =
+        gainLoss !== null && invested > 0
+          ? (gainLoss / invested) * 100
+          : null;
+      return {
+        totalInvested: invested,
+        totalCurrentValue: currentValue,
+        totalGainLoss: gainLoss,
+        totalGainLossPct: gainLossPct,
+      };
+    }, [holdings]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingInvestment, setEditingInvestment] =

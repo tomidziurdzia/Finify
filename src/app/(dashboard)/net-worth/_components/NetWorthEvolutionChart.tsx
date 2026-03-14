@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -38,12 +39,12 @@ export function NetWorthEvolutionChart({
     );
   }
 
-  const chartData = data.map((point) => ({
+  const chartData = useMemo(() => data.map((point) => ({
     name: MONTH_NAMES[point.month - 1]?.slice(0, 3) ?? String(point.month),
     Activos: point.assets,
     Pasivos: point.liabilities,
     Neto: point.netWorth,
-  }));
+  })), [data]);
 
   return (
     <Card>

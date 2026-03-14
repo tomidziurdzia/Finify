@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -192,16 +192,16 @@ export default function BudgetPage() {
     setAmountDraftByCategoryId(nextDrafts);
   }, [categoryRows]);
 
-  const handleDraftAmountChange = (categoryId: string, value: string) => {
+  const handleDraftAmountChange = useCallback((categoryId: string, value: string) => {
     setAmountDraftByCategoryId((prev) => ({ ...prev, [categoryId]: value }));
-  };
+  }, []);
 
-  const handleDraftAmountBlur = (categoryId: string) => {
+  const handleDraftAmountBlur = useCallback((categoryId: string) => {
     setAmountDraftByCategoryId((prev) => ({
       ...prev,
       [categoryId]: formatMoneyInput(prev[categoryId] ?? ""),
     }));
-  };
+  }, []);
 
   const handleSaveCategoryAmount = async (category: BudgetCategory) => {
     if (!selectedMonthId) return false;

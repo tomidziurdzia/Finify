@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import {
   Dialog,
@@ -232,13 +232,12 @@ export function TransactionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transaction, open, activeAccounts.length]);
 
-  const handleAmountChange = (val: string) => {
+  const handleAmountChange = useCallback((val: string) => {
     const formatted = formatNumberInput(val);
     form.setValue("amount", formatted);
     const amt = parseNumberInput(formatted);
     if (baseManuallyEdited.current) {
-      // User set base manually → recalculate rate
-      const base = parseNumberInput(form.watch("base_amount"));
+      const base = parseNumberInput(form.getValues("base_amount"));
       if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
         const newRate = Math.round((base / amt) * 100000000) / 100000000;
         form.setValue(
@@ -247,8 +246,7 @@ export function TransactionDialog({
         );
       }
     } else {
-      // Base was auto-calculated → recalculate base from rate
-      const rate = parseNumberInput(form.watch("exchange_rate"));
+      const rate = parseNumberInput(form.getValues("exchange_rate"));
       if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
         const newBase = Math.round(amt * rate * 100) / 100;
         form.setValue(
@@ -257,13 +255,13 @@ export function TransactionDialog({
         );
       }
     }
-  };
+  }, [form]);
 
-  const handleRateChange = (val: string) => {
+  const handleRateChange = useCallback((val: string) => {
     const formatted = formatNumberInput(val);
     form.setValue("exchange_rate", formatted);
     baseManuallyEdited.current = false;
-    const amt = parseNumberInput(form.watch("amount"));
+    const amt = parseNumberInput(form.getValues("amount"));
     const rate = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
       const newBase = Math.round(amt * rate * 100) / 100;
@@ -272,13 +270,13 @@ export function TransactionDialog({
         formatNumberInput(String(newBase).replace(".", ",")),
       );
     }
-  };
+  }, [form]);
 
-  const handleBaseAmountChange = (val: string) => {
+  const handleBaseAmountChange = useCallback((val: string) => {
     baseManuallyEdited.current = true;
     const formatted = formatNumberInput(val);
     form.setValue("base_amount", formatted);
-    const amt = parseNumberInput(form.watch("amount"));
+    const amt = parseNumberInput(form.getValues("amount"));
     const base = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
       const newRate = Math.round((base / amt) * 100000000) / 100000000;
@@ -287,7 +285,7 @@ export function TransactionDialog({
         formatNumberInput(String(newRate).replace(".", ",")),
       );
     }
-  };
+  }, [form]);
 
   const onSubmit = async (values: TransactionFormValues) => {
     form.clearErrors();
