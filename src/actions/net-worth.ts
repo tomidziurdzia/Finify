@@ -657,85 +657,99 @@ export async function getNetWorthEvolution(
     if (monthsError) return { error: monthsError.message };
     if (!monthRows || monthRows.length === 0) return { data: [] };
 
-    // 2. Obtener cuentas activas
-    const { data: accounts } = await supabase
-      .from("accounts")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("is_active", true);
+    const monthIds = monthRows.map((m) => m.id);
 
-    const accountIds = (accounts ?? []).map((a) => a.id);
+    // 2. Fetch accounts, liabilities and their snapshots in parallel
+    const [accountsRes, liabilityItemsRes] = await Promise.all([
+      supabase
+        .from("accounts")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("is_active", true),
+      supabase
+        .from("nw_items")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("side", "liability"),
+    ]);
 
-    // 3. Obtener pasivos (nw_items liability) y sus snapshots del año
-    const { data: liabilityItems } = await supabase
-      .from("nw_items")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("side", "liability");
+    const accountIds = (accountsRes.data ?? []).map((a) => a.id);
+    const liabilityIds = (liabilityItemsRes.data ?? []).map((i) => i.id);
 
-    const liabilityIds = (liabilityItems ?? []).map((i) => i.id);
-    let liabilitySnaps: { nw_item_id: string; month: number; amount: number; amount_base: number | null }[] = [];
+    // 3. Batch fetch ALL openings + transactions + liability snapshots for the year
+    const [allOpeningsRes, allTxRes, liabilitySnapsRes] = await Promise.all([
+      accountIds.length > 0
+        ? supabase
+            .from("opening_balances")
+            .select("month_id, account_id, opening_base_amount")
+            .in("month_id", monthIds)
+        : Promise.resolve({ data: [] as { month_id: string; account_id: string; opening_base_amount: number }[] }),
+      accountIds.length > 0
+        ? supabase
+            .from("transactions")
+            .select("month_id, transaction_amounts ( account_id, base_amount )")
+            .in("month_id", monthIds)
+            .eq("user_id", userId)
+        : Promise.resolve({ data: [] as any[] }),
+      liabilityIds.length > 0
+        ? supabase
+            .from("nw_snapshots")
+            .select("nw_item_id, month, amount, amount_base")
+            .in("nw_item_id", liabilityIds)
+            .eq("year", year)
+            .order("month")
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
 
-    if (liabilityIds.length > 0) {
-      const { data: snaps } = await supabase
-        .from("nw_snapshots")
-        .select("nw_item_id, month, amount, amount_base")
-        .in("nw_item_id", liabilityIds)
-        .eq("year", year)
-        .order("month");
-
-      liabilitySnaps = (snaps ?? []).map((s) => ({
-        nw_item_id: s.nw_item_id,
-        month: s.month,
-        amount: Number(s.amount),
-        amount_base: s.amount_base != null ? Number(s.amount_base) : null,
-      }));
+    // 4. Group openings by month_id
+    const openingsByMonth = new Map<string, number>();
+    for (const ob of (allOpeningsRes.data ?? []) as any[]) {
+      const key = ob.month_id as string;
+      openingsByMonth.set(key, (openingsByMonth.get(key) ?? 0) + Number(ob.opening_base_amount));
     }
 
-    // 4. Para cada mes, calcular activos y pasivos
+    // 5. Group transaction base_amounts by month_id
+    const txByMonth = new Map<string, number>();
+    for (const tx of (allTxRes.data ?? []) as any[]) {
+      const monthId = tx.month_id as string;
+      const lines = Array.isArray(tx.transaction_amounts)
+        ? tx.transaction_amounts
+        : tx.transaction_amounts
+          ? [tx.transaction_amounts]
+          : [];
+      for (const line of lines) {
+        txByMonth.set(monthId, (txByMonth.get(monthId) ?? 0) + Number(line.base_amount));
+      }
+    }
+
+    // 6. Pre-process liability snapshots into Map<itemId, Map<month, value>>
+    const liabilitySnapsByItem = new Map<string, { month: number; value: number }[]>();
+    for (const s of (liabilitySnapsRes.data ?? []) as any[]) {
+      const itemId = s.nw_item_id as string;
+      const value = s.amount_base != null ? Number(s.amount_base) : Number(s.amount);
+      if (!liabilitySnapsByItem.has(itemId)) {
+        liabilitySnapsByItem.set(itemId, []);
+      }
+      liabilitySnapsByItem.get(itemId)!.push({ month: s.month, value });
+    }
+
+    // 7. Calculate points for each month (no DB calls in loop)
     const points: NetWorthEvolutionPoint[] = [];
 
     for (const m of monthRows) {
-      // Activos: opening_balances + transaction_amounts del mes
-      let assets = 0;
+      const assets = (openingsByMonth.get(m.id) ?? 0) + (txByMonth.get(m.id) ?? 0);
 
-      if (accountIds.length > 0) {
-        const { data: openings } = await supabase
-          .from("opening_balances")
-          .select("account_id, opening_base_amount")
-          .eq("month_id", m.id);
-
-        for (const ob of openings ?? []) {
-          assets += Number(ob.opening_base_amount);
-        }
-
-        const { data: txRows } = await supabase
-          .from("transactions")
-          .select("transaction_amounts ( account_id, base_amount )")
-          .eq("month_id", m.id)
-          .eq("user_id", userId);
-
-        for (const tx of txRows ?? []) {
-          const lines = Array.isArray(tx.transaction_amounts)
-            ? tx.transaction_amounts
-            : tx.transaction_amounts
-              ? [tx.transaction_amounts]
-              : [];
-          for (const line of lines) {
-            assets += Number(line.base_amount);
-          }
-        }
-      }
-
-      // Pasivos: último snapshot ≤ este mes para cada liability item
       let liabilities = 0;
       for (const itemId of liabilityIds) {
-        const snap = liabilitySnaps
-          .filter((s) => s.nw_item_id === itemId && s.month <= m.month)
-          .pop(); // último por month (ya ordenado asc)
-        if (snap) {
-          liabilities += snap.amount_base ?? snap.amount;
+        const snaps = liabilitySnapsByItem.get(itemId);
+        if (!snaps) continue;
+        // snaps are sorted by month asc, find last one <= m.month
+        let latest: { month: number; value: number } | undefined;
+        for (const snap of snaps) {
+          if (snap.month <= m.month) latest = snap;
+          else break;
         }
+        if (latest) liabilities += latest.value;
       }
 
       points.push({

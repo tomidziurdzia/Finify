@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import {
   Dialog,
@@ -219,12 +219,12 @@ export function TransferDialog({
     destinationManuallyEdited.current = false;
   }, [transfer, open, activeAccounts.length, form]);
 
-  const handleAmountChange = (val: string) => {
+  const handleAmountChange = useCallback((val: string) => {
     const formatted = formatNumberInput(val);
     form.setValue("amount", formatted);
     const amt = parseNumberInput(formatted);
     if (destinationManuallyEdited.current) {
-      const base = parseNumberInput(form.watch("destination_amount"));
+      const base = parseNumberInput(form.getValues("destination_amount"));
       if (!isNaN(amt) && amt > 0 && !isNaN(base) && base > 0) {
         const newRate = Math.round((base / amt) * 100000000) / 100000000;
         form.setValue(
@@ -233,7 +233,7 @@ export function TransferDialog({
         );
       }
     } else {
-      const rate = parseNumberInput(form.watch("exchange_rate"));
+      const rate = parseNumberInput(form.getValues("exchange_rate"));
       if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
         const newBase = Math.round(amt * rate * 100) / 100;
         form.setValue(
@@ -242,13 +242,13 @@ export function TransferDialog({
         );
       }
     }
-  };
+  }, [form]);
 
-  const handleRateChange = (val: string) => {
+  const handleRateChange = useCallback((val: string) => {
     const formatted = formatNumberInput(val);
     form.setValue("exchange_rate", formatted);
     destinationManuallyEdited.current = false;
-    const amt = parseNumberInput(form.watch("amount"));
+    const amt = parseNumberInput(form.getValues("amount"));
     const rate = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(rate) && rate > 0) {
       const newBase = Math.round(amt * rate * 100) / 100;
@@ -257,13 +257,13 @@ export function TransferDialog({
         formatNumberInput(String(newBase).replace(".", ","))
       );
     }
-  };
+  }, [form]);
 
-  const handleDestinationAmountChange = (val: string) => {
+  const handleDestinationAmountChange = useCallback((val: string) => {
     destinationManuallyEdited.current = true;
     const formatted = formatNumberInput(val);
     form.setValue("destination_amount", formatted);
-    const amt = parseNumberInput(form.watch("amount"));
+    const amt = parseNumberInput(form.getValues("amount"));
     const base = parseNumberInput(formatted);
     if (!isNaN(amt) && amt > 0 && !isNaN(base)) {
       const newRate = Math.round((base / amt) * 100000000) / 100000000;
@@ -272,7 +272,7 @@ export function TransferDialog({
         formatNumberInput(String(newRate).replace(".", ","))
       );
     }
-  };
+  }, [form]);
 
   const onSubmit = async (values: TransferFormValues) => {
     form.clearErrors();

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -28,7 +29,7 @@ export function IncomeVsExpensesChart({
   summary,
   currencySymbol,
 }: IncomeVsExpensesChartProps) {
-  const data = [
+  const data = useMemo(() => [
     {
       name: "Ingresos",
       value: summary.income,
@@ -59,7 +60,7 @@ export function IncomeVsExpensesChart({
       value: summary.investments,
       fill: CATEGORY_COLORS.investments,
     },
-  ];
+  ], [summary]);
 
   const allZero = data.every((d) => d.value === 0);
 

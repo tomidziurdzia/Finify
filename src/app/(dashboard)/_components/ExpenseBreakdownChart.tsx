@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   PieChart,
   Pie,
@@ -27,35 +28,36 @@ export function ExpenseBreakdownChart({
   summary,
   currencySymbol,
 }: ExpenseBreakdownChartProps) {
-  const raw = [
-    {
-      name: "Gastos Esenciales",
-      value: summary.essentialExpenses,
-      fill: CATEGORY_COLORS.essential_expenses,
-    },
-    {
-      name: "Gastos Discrecionales",
-      value: summary.discretionaryExpenses,
-      fill: CATEGORY_COLORS.discretionary_expenses,
-    },
-    {
-      name: "Pago de Deudas",
-      value: summary.debtPayments,
-      fill: CATEGORY_COLORS.debt_payments,
-    },
-    {
-      name: "Ahorros",
-      value: summary.savings,
-      fill: CATEGORY_COLORS.savings,
-    },
-    {
-      name: "Inversiones",
-      value: summary.investments,
-      fill: CATEGORY_COLORS.investments,
-    },
-  ];
-
-  const data = raw.filter((d) => d.value > 0);
+  const data = useMemo(() => {
+    const raw = [
+      {
+        name: "Gastos Esenciales",
+        value: summary.essentialExpenses,
+        fill: CATEGORY_COLORS.essential_expenses,
+      },
+      {
+        name: "Gastos Discrecionales",
+        value: summary.discretionaryExpenses,
+        fill: CATEGORY_COLORS.discretionary_expenses,
+      },
+      {
+        name: "Pago de Deudas",
+        value: summary.debtPayments,
+        fill: CATEGORY_COLORS.debt_payments,
+      },
+      {
+        name: "Ahorros",
+        value: summary.savings,
+        fill: CATEGORY_COLORS.savings,
+      },
+      {
+        name: "Inversiones",
+        value: summary.investments,
+        fill: CATEGORY_COLORS.investments,
+      },
+    ];
+    return raw.filter((d) => d.value > 0);
+  }, [summary]);
 
   return (
     <Card>

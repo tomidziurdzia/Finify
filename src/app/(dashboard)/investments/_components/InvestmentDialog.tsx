@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import {
   Dialog,
@@ -157,19 +157,7 @@ export function InvestmentDialog({
     }
   }, [selectedAccount, form, isEditing]);
 
-  const handleQuantityChange = (val: string) => {
-    const formatted = formatMoneyInput(val);
-    form.setValue("quantity", formatted);
-    recalcTotal(formatted, form.getValues("price_per_unit"));
-  };
-
-  const handlePriceChange = (val: string) => {
-    const formatted = formatMoneyInput(val);
-    form.setValue("price_per_unit", formatted);
-    recalcTotal(form.getValues("quantity"), formatted);
-  };
-
-  const recalcTotal = (qtyStr: string, priceStr: string) => {
+  const recalcTotal = useCallback((qtyStr: string, priceStr: string) => {
     const qty = parseMoneyInput(qtyStr);
     const price = parseMoneyInput(priceStr);
     if (qty && price && qty > 0 && price > 0) {
@@ -179,7 +167,19 @@ export function InvestmentDialog({
         formatMoneyInput(String(total).replace(".", ","))
       );
     }
-  };
+  }, [form]);
+
+  const handleQuantityChange = useCallback((val: string) => {
+    const formatted = formatMoneyInput(val);
+    form.setValue("quantity", formatted);
+    recalcTotal(formatted, form.getValues("price_per_unit"));
+  }, [form, recalcTotal]);
+
+  const handlePriceChange = useCallback((val: string) => {
+    const formatted = formatMoneyInput(val);
+    form.setValue("price_per_unit", formatted);
+    recalcTotal(form.getValues("quantity"), formatted);
+  }, [form, recalcTotal]);
 
   const onSubmit = async (values: InvestmentFormValues) => {
     const quantity = parseMoneyInput(values.quantity);

@@ -73,12 +73,17 @@ export function useCreateTransaction() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      toast.success("Transacción creada correctamente");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: TRANSACTION_KEYS.all });
     },
     onError: (error: Error) => {
       toast.error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Transacción creada correctamente");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
     },
   });
 }
@@ -91,12 +96,17 @@ export function useCreateTransfer() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      toast.success("Transferencia creada correctamente");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: TRANSACTION_KEYS.all });
     },
     onError: (error: Error) => {
       toast.error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Transferencia creada correctamente");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
     },
   });
 }
@@ -109,12 +119,17 @@ export function useUpdateTransaction() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      toast.success("Transacción actualizada correctamente");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: TRANSACTION_KEYS.all });
     },
     onError: (error: Error) => {
       toast.error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Transacción actualizada correctamente");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
     },
   });
 }
@@ -127,12 +142,17 @@ export function useDeleteTransaction() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      toast.success("Transacción eliminada correctamente");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: TRANSACTION_KEYS.all });
     },
     onError: (error: Error) => {
       toast.error(error.message);
+    },
+    onSuccess: () => {
+      toast.success("Transacción eliminada correctamente");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
     },
   });
 }

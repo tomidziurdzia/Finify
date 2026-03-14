@@ -12,6 +12,7 @@ import type {
   CreateInvestmentInput,
   UpdateInvestmentInput,
 } from "@/lib/validations/investment.schema";
+import type { InvestmentWithAccount } from "@/types/investments";
 import { toast } from "sonner";
 
 const INVESTMENT_KEYS = {
@@ -28,6 +29,7 @@ export function useInvestments() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -39,12 +41,17 @@ export function useCreateInvestment() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      toast.success("Inversión registrada");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: INVESTMENT_KEYS.all });
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Inversión registrada");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
   });
 }
 
@@ -56,11 +63,16 @@ export function useUpdateInvestment() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
-      toast.success("Inversión actualizada");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: INVESTMENT_KEYS.all });
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Inversión actualizada");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+    },
   });
 }
 
@@ -72,11 +84,29 @@ export function useDeleteInvestment() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: INVESTMENT_KEYS.all });
+      const previous = queryClient.getQueryData<InvestmentWithAccount[]>(
+        INVESTMENT_KEYS.all
+      );
+      queryClient.setQueryData<InvestmentWithAccount[]>(
+        INVESTMENT_KEYS.all,
+        (old) => (old ?? []).filter((inv) => inv.id !== id)
+      );
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(INVESTMENT_KEYS.all, context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
       toast.success("Inversión eliminada");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+    },
   });
 }
 

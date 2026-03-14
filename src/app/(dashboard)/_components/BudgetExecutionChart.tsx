@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -28,13 +29,14 @@ export function BudgetExecutionChart({
   budgetSummary,
   currencySymbol,
 }: BudgetExecutionChartProps) {
-  const categories = budgetSummary?.categories ?? [];
-
-  const data = categories.map((cat) => ({
-    name: cat.category_name,
-    Planificado: cat.planned_amount,
-    Real: cat.actual_amount,
-  }));
+  const data = useMemo(() => {
+    const categories = budgetSummary?.categories ?? [];
+    return categories.map((cat) => ({
+      name: cat.category_name,
+      Planificado: cat.planned_amount,
+      Real: cat.actual_amount,
+    }));
+  }, [budgetSummary]);
 
   return (
     <Card>

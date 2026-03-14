@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getNwItems,
@@ -36,6 +37,7 @@ export function useNwItems() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -47,11 +49,16 @@ export function useCreateNwItem() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
-      toast.success("Ítem de patrimonio creado");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: NW_KEYS.items });
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Ítem de patrimonio creado");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
+    },
   });
 }
 
@@ -63,11 +70,30 @@ export function useUpdateNwItem() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (updatedItem) => {
+      await queryClient.cancelQueries({ queryKey: NW_KEYS.items });
+      const previous = queryClient.getQueryData<NwItemWithRelations[]>(NW_KEYS.items);
+      queryClient.setQueryData<NwItemWithRelations[]>(NW_KEYS.items, (old) =>
+        (old ?? []).map((item) =>
+          item.id === updatedItem.id
+            ? { ...item, ...updatedItem, updated_at: new Date().toISOString() }
+            : item
+        )
+      );
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(NW_KEYS.items, context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
       toast.success("Ítem actualizado");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
+    },
   });
 }
 
@@ -79,11 +105,26 @@ export function useDeleteNwItem() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: NW_KEYS.items });
+      const previous = queryClient.getQueryData<NwItemWithRelations[]>(NW_KEYS.items);
+      queryClient.setQueryData<NwItemWithRelations[]>(NW_KEYS.items, (old) =>
+        (old ?? []).filter((item) => item.id !== id)
+      );
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(NW_KEYS.items, context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
       toast.success("Ítem eliminado");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
+    },
   });
 }
 
@@ -95,6 +136,7 @@ export function useNwMonthSummary(year: number, month: number) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -107,6 +149,7 @@ export function useNwYearSummary(year: number) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -118,12 +161,27 @@ export function useUpsertNwSnapshot(year: number) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
-      queryClient.invalidateQueries({ queryKey: NW_KEYS.year(year) });
-      toast.success("Valor guardado");
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: NW_KEYS.items });
+      await queryClient.cancelQueries({ queryKey: NW_KEYS.year(year) });
+      await queryClient.cancelQueries({
+        queryKey: NW_KEYS.month(input.year, input.month),
+      });
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Valor guardado");
+    },
+    onSettled: (_, __, input) => {
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.year(year) });
+      queryClient.invalidateQueries({
+        queryKey: NW_KEYS.month(input.year, input.month),
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["net-worth", "evolution", year],
+      });
+    },
   });
 }
 
@@ -136,6 +194,7 @@ export function useAccountNetWorth(year: number) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -144,16 +203,12 @@ export function useAccountNetWorth(year: number) {
 /* ------------------------------------------------------------------ */
 
 export function useDebts() {
-  return useQuery({
-    queryKey: [...NW_KEYS.items, "debts"],
-    queryFn: async () => {
-      const result = await getNwItems();
-      if ("error" in result) throw new Error(result.error);
-      return (result.data as NwItemWithRelations[]).filter(
-        (item) => item.side === "liability"
-      );
-    },
-  });
+  const { data: allItems, ...rest } = useNwItems();
+  const debts = useMemo(
+    () => (allItems ?? []).filter((item) => item.side === "liability"),
+    [allItems]
+  );
+  return { data: debts, ...rest };
 }
 
 export function useCreateDebt() {
@@ -164,11 +219,16 @@ export function useCreateDebt() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
-      toast.success("Deuda creada");
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: NW_KEYS.items });
     },
     onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Deuda creada");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.items });
+    },
   });
 }
 
@@ -181,6 +241,7 @@ export function useLiabilitiesForYear(year: number) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -193,5 +254,6 @@ export function useNetWorthEvolution(year: number) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }

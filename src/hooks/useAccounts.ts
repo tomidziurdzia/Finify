@@ -10,6 +10,7 @@ import {
   getAccountInitialBalance,
 } from "@/actions/accounts";
 import type { CreateAccountInput, UpdateAccountInput } from "@/lib/validations/account.schema";
+import type { Account } from "@/types/accounts";
 import { toast } from "sonner";
 
 export function useAccounts() {
@@ -20,6 +21,7 @@ export function useAccounts() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -43,13 +45,37 @@ export function useCreateAccount() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (newAccount) => {
+      await queryClient.cancelQueries({ queryKey: ["accounts"] });
+      const previous = queryClient.getQueryData<Account[]>(["accounts"]);
+      queryClient.setQueryData<Account[]>(["accounts"], (old) => [
+        ...(old ?? []),
+        {
+          id: `temp-${Date.now()}`,
+          user_id: "",
+          name: newAccount.name,
+          account_type: newAccount.account_type,
+          currency: newAccount.currency,
+          is_active: true,
+          notes: newAccount.notes ?? null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ]);
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["accounts"], context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["opening-balances"] });
       toast.success("Cuenta creada correctamente");
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opening-balances"] });
     },
   });
 }
@@ -62,14 +88,31 @@ export function useUpdateAccount() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (updatedAccount) => {
+      await queryClient.cancelQueries({ queryKey: ["accounts"] });
+      const previous = queryClient.getQueryData<Account[]>(["accounts"]);
+      queryClient.setQueryData<Account[]>(["accounts"], (old) =>
+        (old ?? []).map((acc) =>
+          acc.id === updatedAccount.id
+            ? { ...acc, ...updatedAccount, updated_at: new Date().toISOString() }
+            : acc
+        )
+      );
+      return { previous };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["accounts"], context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
+      toast.success("Cuenta actualizada correctamente");
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       queryClient.invalidateQueries({ queryKey: ["opening-balances"] });
       queryClient.invalidateQueries({ queryKey: ["accountInitialBalance"] });
-      toast.success("Cuenta actualizada correctamente");
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
     },
   });
 }
@@ -84,7 +127,7 @@ export function useAccountInitialBalance(accountId: string | undefined) {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    staleTime: 30_000,
+    staleTime: 10 * 60_000,
   });
 }
 
@@ -96,12 +139,25 @@ export function useDeleteAccount() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["accounts"] });
+      const previous = queryClient.getQueryData<Account[]>(["accounts"]);
+      queryClient.setQueryData<Account[]>(["accounts"], (old) =>
+        (old ?? []).filter((acc) => acc.id !== id)
+      );
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["accounts"], context.previous);
+      }
+      toast.error(_err.message);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
       toast.success("Cuenta eliminada correctamente");
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
 }

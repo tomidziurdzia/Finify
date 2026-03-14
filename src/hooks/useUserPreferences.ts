@@ -20,6 +20,7 @@ export function useUserPreferences() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: Infinity,
   });
 }
 
