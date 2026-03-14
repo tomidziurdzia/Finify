@@ -106,6 +106,7 @@ export async function getTransactions(
       )
       .eq("user_id", user.id)
       .eq("month_id", monthId)
+      .is("deleted_at", null)
       .order("date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -224,6 +225,7 @@ export async function getTransactionsForRange(
       )
       .eq("user_id", user.id)
       .in("month_id", monthIds)
+      .is("deleted_at", null)
       .order("date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -750,7 +752,7 @@ export async function updateTransaction(
   }
 }
 
-// --- DELETE TRANSACTION ---
+// --- DELETE TRANSACTION (soft-delete) ---
 export async function deleteTransaction(
   id: string
 ): Promise<ActionResult<null>> {
@@ -767,6 +769,7 @@ export async function deleteTransaction(
       .select("month_id")
       .eq("id", id)
       .eq("user_id", user.id)
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (!tx) return { error: "Transacción no encontrada" };
@@ -784,7 +787,7 @@ export async function deleteTransaction(
 
     const { error } = await supabase
       .from("transactions")
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq("id", id)
       .eq("user_id", user.id);
 
@@ -794,5 +797,32 @@ export async function deleteTransaction(
   } catch (e) {
     console.error("deleteTransaction:", e);
     return { error: "Error al eliminar la transacción" };
+  }
+}
+
+// --- RESTORE TRANSACTION (undo soft-delete) ---
+export async function restoreTransaction(
+  id: string
+): Promise<ActionResult<null>> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "No autenticado" };
+
+    const { error } = await supabase
+      .from("transactions")
+      .update({ deleted_at: null })
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .not("deleted_at", "is", null);
+
+    if (error) return { error: error.message };
+
+    return { data: null };
+  } catch (e) {
+    console.error("restoreTransaction:", e);
+    return { error: "Error al restaurar la transacción" };
   }
 }

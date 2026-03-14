@@ -24,20 +24,18 @@ import {
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
 import { useBudgetCategories } from "@/hooks/useBudget";
-import { BUDGET_CATEGORY_LABELS, type BudgetCategoryType } from "@/types/budget";
 import {
   useCreateTransaction,
   useUpdateTransaction,
   useBaseCurrency,
 } from "@/hooks/useTransactions";
+import { useMatchRules } from "@/hooks/useTransactionRules";
 import { CreateTransactionSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
 import { fetchExchangeRate } from "@/lib/frankfurter";
@@ -47,7 +45,9 @@ import {
   type TransactionWithRelations,
 } from "@/types/transactions";
 import { format } from "date-fns";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { CategoryCombobox } from "@/components/category-combobox";
 
 interface TransactionDialogProps {
   transaction: TransactionWithRelations | null;
@@ -102,8 +102,12 @@ export function TransactionDialog({
   const { data: baseCurrency } = useBaseCurrency();
   const createMutation = useCreateTransaction();
   const updateMutation = useUpdateTransaction();
+  const matchRules = useMatchRules();
 
   const isPending = createMutation.isPending || updateMutation.isPending;
+
+  // Track which rule auto-categorized
+  const appliedRuleRef = useRef<string | null>(null);
 
   const fetchingRateRef = useRef(false);
 
@@ -129,15 +133,6 @@ export function TransactionDialog({
     // correction → all categories
     return all;
   })();
-
-  // Group filtered categories by category_type for the Select
-  const groupedCategories = filteredCategories.reduce<
-    Record<BudgetCategoryType, typeof filteredCategories>
-  >((acc, cat) => {
-    if (!acc[cat.category_type]) acc[cat.category_type] = [];
-    acc[cat.category_type].push(cat);
-    return acc;
-  }, {} as Record<BudgetCategoryType, typeof filteredCategories>);
 
   // Track whether the user manually edited base_amount
   const baseManuallyEdited = useRef(false);
@@ -286,6 +281,33 @@ export function TransactionDialog({
       );
     }
   }, [form]);
+
+  const handleDescriptionBlur = useCallback(async () => {
+    if (isEditing) return;
+    const description = form.getValues("description").trim();
+    const notes = form.getValues("notes").trim();
+    if (!description) return;
+
+    try {
+      const match = await matchRules.mutateAsync({
+        description,
+        notes: notes || null,
+      });
+      if (match) {
+        if (match.category_id) {
+          form.setValue("category_id", match.category_id);
+        }
+        if (match.rename_to) {
+          form.setValue("description", match.rename_to);
+        }
+        appliedRuleRef.current = match.rule_name;
+      } else {
+        appliedRuleRef.current = null;
+      }
+    } catch {
+      // Silently ignore rule matching errors
+    }
+  }, [isEditing, form, matchRules]);
 
   const onSubmit = async (values: TransactionFormValues) => {
     form.clearErrors();
@@ -485,31 +507,13 @@ export function TransactionDialog({
                   <FormItem>
                     <FormFieldLabel>Categoría</FormFieldLabel>
                     <FormControl>
-                      <Select
+                      <CategoryCombobox
+                        categories={filteredCategories}
                         value={field.value}
                         onValueChange={field.onChange}
+                        grouped
                         disabled={isPending}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar categoría" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(groupedCategories).map(
-                            ([type, cats]) => (
-                              <SelectGroup key={type}>
-                                <SelectLabel>
-                                  {BUDGET_CATEGORY_LABELS[type as BudgetCategoryType]}
-                                </SelectLabel>
-                                {cats.map((c) => (
-                                  <SelectItem key={c.id} value={c.id}>
-                                    {c.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            ),
-                          )}
-                        </SelectContent>
-                      </Select>
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -530,8 +534,20 @@ export function TransactionDialog({
                     placeholder="Ej: Supermercado, Sueldo, etc."
                     disabled={isPending}
                     {...field}
+                    onBlur={(e) => {
+                      field.onBlur();
+                      if (e.target.value.trim()) {
+                        handleDescriptionBlur();
+                      }
+                    }}
                   />
                 </FormControl>
+                {appliedRuleRef.current && !isEditing && (
+                  <Badge variant="secondary" className="text-xs gap-1">
+                    <Sparkles className="size-3" />
+                    Auto-categorizado: {appliedRuleRef.current}
+                  </Badge>
+                )}
                 <FormMessage />
               </FormItem>
             )}

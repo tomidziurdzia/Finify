@@ -30,6 +30,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUserPreferences, useUpdateUserPreferences } from "@/hooks/useUserPreferences";
 import { useCurrencies } from "@/hooks/useAccounts";
+import { TransactionRulesSection } from "./_components/TransactionRulesSection";
 
 const SettingsFormSchema = z.object({
   base_currency: z.string().min(1, "Elija una moneda"),
@@ -167,6 +168,8 @@ export default function SettingsPage() {
           </Button>
         </form>
       </Form>
+
+      <TransactionRulesSection />
     </div>
   );
 }

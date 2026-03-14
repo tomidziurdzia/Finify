@@ -16,6 +16,8 @@ import {
   ArrowLeftRight,
   CreditCard,
   TrendingUp,
+  Repeat,
+  Target,
 } from "lucide-react";
 import {
   Sidebar,
@@ -165,6 +167,12 @@ export function AppSidebar() {
                 active={pathname.startsWith("/transactions")}
               />
               <CollapsedDropdownItem
+                href="/recurring"
+                icon={Repeat}
+                label="Recurrentes"
+                active={pathname.startsWith("/recurring")}
+              />
+              <CollapsedDropdownItem
                 href="/accounts"
                 icon={Landmark}
                 label="Cuentas"
@@ -181,6 +189,12 @@ export function AppSidebar() {
                 icon={TrendingUp}
                 label="Inversiones"
                 active={pathname.startsWith("/investments")}
+              />
+              <CollapsedDropdownItem
+                href="/savings"
+                icon={Target}
+                label="Metas de Ahorro"
+                active={pathname.startsWith("/savings")}
               />
               <CollapsedDropdownItem
                 href="/net-worth"

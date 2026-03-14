@@ -473,7 +473,8 @@ export async function getAccountNetWorth(
       .from("transactions")
       .select("transaction_amounts ( account_id, amount, base_amount )")
       .eq("month_id", latestMonth.id)
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .is("deleted_at", null);
 
     if (txError) return { error: txError.message };
 
@@ -690,6 +691,7 @@ export async function getNetWorthEvolution(
             .select("month_id, transaction_amounts ( account_id, base_amount )")
             .in("month_id", monthIds)
             .eq("user_id", userId)
+            .is("deleted_at", null)
         : Promise.resolve({ data: [] as any[] }),
       liabilityIds.length > 0
         ? supabase

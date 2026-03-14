@@ -353,12 +353,24 @@ export function useUpsertBudgetMonthPlan(monthId: string | null) {
     },
     onMutate: async (input) => {
       const targetMonthId = input.month_id;
+
+      // Cancel both lines and summary queries
       await queryClient.cancelQueries({
         queryKey: BUDGET_KEYS.lines(targetMonthId),
       });
-      const previous = queryClient.getQueryData<BudgetLineWithPlan[]>(
+      await queryClient.cancelQueries({
+        queryKey: BUDGET_KEYS.summary(targetMonthId),
+      });
+
+      // Snapshot previous state for rollback
+      const previousLines = queryClient.getQueryData<BudgetLineWithPlan[]>(
         BUDGET_KEYS.lines(targetMonthId)
       );
+      const previousSummary = queryClient.getQueryData<BudgetSummaryVsActual>(
+        BUDGET_KEYS.summary(targetMonthId)
+      );
+
+      // Optimistically update lines cache
       queryClient.setQueryData<BudgetLineWithPlan[]>(
         BUDGET_KEYS.lines(targetMonthId),
         (old) =>
@@ -368,14 +380,55 @@ export function useUpsertBudgetMonthPlan(monthId: string | null) {
               : line
           )
       );
-      return { previous, targetMonthId };
+
+      // Optimistically update summary cache (totals + category row)
+      if (previousLines) {
+        const updatedLine = previousLines.find((l) => l.id === input.line_id);
+        if (updatedLine) {
+          const oldPlanned = updatedLine.planned_amount;
+          const diff = input.planned_amount - oldPlanned;
+
+          queryClient.setQueryData<BudgetSummaryVsActual>(
+            BUDGET_KEYS.summary(targetMonthId),
+            (old) => {
+              if (!old) return old;
+              return {
+                totals: {
+                  ...old.totals,
+                  planned: old.totals.planned + diff,
+                  variance: old.totals.variance + diff,
+                },
+                categories: old.categories.map((cat) =>
+                  cat.category_id === updatedLine.category_id
+                    ? {
+                        ...cat,
+                        planned_amount: cat.planned_amount + diff,
+                        variance: cat.variance + diff,
+                      }
+                    : cat
+                ),
+              };
+            }
+          );
+        }
+      }
+
+      return { previousLines, previousSummary, targetMonthId };
     },
     onError: (_err, _input, context) => {
-      if (context?.previous && context.targetMonthId) {
-        queryClient.setQueryData(
-          BUDGET_KEYS.lines(context.targetMonthId),
-          context.previous
-        );
+      if (context?.targetMonthId) {
+        if (context.previousLines) {
+          queryClient.setQueryData(
+            BUDGET_KEYS.lines(context.targetMonthId),
+            context.previousLines
+          );
+        }
+        if (context.previousSummary) {
+          queryClient.setQueryData(
+            BUDGET_KEYS.summary(context.targetMonthId),
+            context.previousSummary
+          );
+        }
       }
       toast.error(_err.message);
     },

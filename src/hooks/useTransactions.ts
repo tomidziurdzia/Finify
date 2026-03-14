@@ -9,6 +9,7 @@ import {
   createTransfer,
   updateTransaction,
   deleteTransaction,
+  restoreTransaction,
 } from "@/actions/transactions";
 import type { CreateTransactionInput, CreateTransferInput, UpdateTransactionInput } from "@/lib/validations/transaction.schema";
 import { toast } from "sonner";
@@ -136,6 +137,7 @@ export function useUpdateTransaction() {
 
 export function useDeleteTransaction() {
   const queryClient = useQueryClient();
+  const restore = useRestoreTransaction();
   return useMutation({
     mutationFn: async (id: string) => {
       const result = await deleteTransaction(id);
@@ -148,8 +150,37 @@ export function useDeleteTransaction() {
     onError: (error: Error) => {
       toast.error(error.message);
     },
+    onSuccess: (_, deletedId) => {
+      toast.success("Transacción eliminada", {
+        action: {
+          label: "Deshacer",
+          onClick: () => restore.mutate(deletedId),
+        },
+        duration: 8000,
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
+    },
+  });
+}
+
+export function useRestoreTransaction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const result = await restoreTransaction(id);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: TRANSACTION_KEYS.all });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
     onSuccess: () => {
-      toast.success("Transacción eliminada correctamente");
+      toast.success("Transacción restaurada");
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });

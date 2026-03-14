@@ -62,7 +62,10 @@ export default function BudgetPage() {
   const ensureCurrentMonth = useEnsureCurrentMonth();
   const { data: baseCurrency } = useBaseCurrency();
   const { data: currencies } = useCurrencies();
-  const sortedMonths = months ?? [];
+  const sortedMonths = useMemo(
+    () => [...(months ?? [])].sort((a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month)),
+    [months]
+  );
 
   const currencySymbol = useMemo(() => {
     if (!baseCurrency) return "$";
@@ -137,14 +140,14 @@ export default function BudgetPage() {
         .map((category) => {
           const line = lineByCategoryId.get(category.id) ?? null;
           const summaryValues = summaryByCategoryId.get(category.id);
+          const planned = line?.planned_amount ?? summaryValues?.planned ?? 0;
+          const actual = summaryValues?.actual ?? 0;
           return {
             category,
             line,
-            planned: summaryValues?.planned ?? line?.planned_amount ?? 0,
-            actual: summaryValues?.actual ?? 0,
-            variance:
-              summaryValues?.variance ??
-              (line?.planned_amount ?? 0) - (summaryValues?.actual ?? 0),
+            planned,
+            actual,
+            variance: planned - actual,
           };
         }),
     [categories, lineByCategoryId, summaryByCategoryId],

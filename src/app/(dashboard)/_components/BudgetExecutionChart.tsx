@@ -92,7 +92,7 @@ export function BudgetExecutionChart({
                 fill="#94a3b8"
                 radius={[4, 4, 0, 0]}
               />
-              <Bar dataKey="Real" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Real" fill="#60a5fa" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
