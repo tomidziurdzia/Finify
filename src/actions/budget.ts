@@ -711,6 +711,7 @@ export async function getBudgetSummaryVsActual(
         )
         .eq("user_id", userId)
         .eq("month_id", monthId)
+        .is("deleted_at", null)
         .not("category_id", "is", null)
         // Transfers are excluded from budget comparison because they move
         // money between accounts without generating income or expense.
@@ -908,6 +909,7 @@ export async function getBudgetSummaryVsActualForRange(
       )
       .eq("user_id", userId)
       .in("month_id", monthIds)
+      .is("deleted_at", null)
       .not("category_id", "is", null)
       .neq("transaction_type", "transfer");
     if (txError) return { error: txError.message };

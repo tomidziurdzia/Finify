@@ -25,10 +25,12 @@ import { MONTH_NAMES } from "@/lib/format";
 import type { Month } from "@/types/months";
 
 import { SummaryCards } from "./SummaryCards";
+import { SafeToSpendCard } from "./SafeToSpendCard";
 import { AccountBalances } from "./AccountBalances";
 import { IncomeVsExpensesChart } from "./IncomeVsExpensesChart";
 import { ExpenseBreakdownChart } from "./ExpenseBreakdownChart";
 import { BudgetExecutionChart } from "./BudgetExecutionChart";
+import { ForecastChart } from "./ForecastChart";
 
 function monthOrder(a: Month, b: Month): number {
   return a.year * 100 + a.month - (b.year * 100 + b.month);
@@ -40,7 +42,10 @@ export function DashboardClient() {
 
   const { data: months } = useMonths();
   const ensureCurrentMonth = useEnsureCurrentMonth();
-  const sortedMonths = useMemo(() => [...(months ?? [])], [months]);
+  const sortedMonths = useMemo(
+    () => [...(months ?? [])].sort((a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month)),
+    [months]
+  );
   const fromMonth = sortedMonths.find((m) => m.id === fromMonthId) ?? null;
   const toMonth = sortedMonths.find((m) => m.id === toMonthId) ?? null;
 
@@ -169,6 +174,14 @@ export function DashboardClient() {
 
       <SummaryCards summary={monthSummary} currencySymbol={currencySymbol} />
 
+      {!isRange && (
+        <SafeToSpendCard
+          summary={monthSummary}
+          budgetSummary={budgetSummary}
+          currencySymbol={currencySymbol}
+        />
+      )}
+
       <div className="grid gap-4 md:grid-cols-2">
         <IncomeVsExpensesChart
           summary={monthSummary}
@@ -184,6 +197,8 @@ export function DashboardClient() {
         budgetSummary={budgetSummary}
         currencySymbol={currencySymbol}
       />
+
+      {!isRange && <ForecastChart currencySymbol={currencySymbol} />}
 
       <AccountBalances
         balances={accountMonthlyBalances}

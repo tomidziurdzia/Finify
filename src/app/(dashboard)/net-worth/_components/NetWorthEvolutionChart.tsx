@@ -62,15 +62,16 @@ export function NetWorthEvolutionChart({
             />
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             <Tooltip
+              cursor={false}
               formatter={(value: any, name: any) => [
                 `${currencySymbol} ${formatAmount(Number(value) || 0)}`,
                 String(name),
               ]}
             />
             <Legend />
-            <Bar dataKey="Activos" fill="#22c55e" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="Pasivos" fill="#ef4444" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="Neto" fill="#6366f1" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="Activos" fill="#34d399" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="Pasivos" fill="#f87171" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="Neto" fill="#818cf8" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </CardContent>
