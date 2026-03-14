@@ -1,0 +1,59 @@
+export const ASSET_TYPES = ["stock", "etf", "crypto", "bond", "other"] as const;
+export type AssetType = (typeof ASSET_TYPES)[number];
+
+export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
+  stock: "Acción",
+  etf: "ETF",
+  crypto: "Crypto",
+  bond: "Bono",
+  other: "Otro",
+};
+
+export interface Investment {
+  id: string;
+  user_id: string;
+  account_id: string;
+  asset_name: string;
+  ticker: string | null;
+  asset_type: AssetType;
+  quantity: number;
+  price_per_unit: number;
+  total_cost: number;
+  currency: string;
+  purchase_date: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestmentWithAccount extends Investment {
+  account_name: string;
+  account_type: string;
+  currency_symbol: string;
+}
+
+export interface HoldingPosition {
+  ticker: string;
+  asset_name: string;
+  asset_type: AssetType;
+  account_id: string;
+  account_name: string;
+  currency: string;
+  currency_symbol: string;
+  total_quantity: number;
+  avg_cost_per_unit: number;
+  total_cost: number;
+  current_price: number | null;
+  current_value: number | null;
+  gain_loss: number | null;
+  gain_loss_pct: number | null;
+  investments: Investment[];
+}
+
+export interface PortfolioSummary {
+  total_invested: number;
+  total_current_value: number | null;
+  total_gain_loss: number | null;
+  total_gain_loss_pct: number | null;
+  holdings: HoldingPosition[];
+}

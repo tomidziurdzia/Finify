@@ -15,6 +15,7 @@ import {
   Layers,
   ArrowLeftRight,
   CreditCard,
+  TrendingUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -174,6 +175,12 @@ export function AppSidebar() {
                 icon={CreditCard}
                 label="Deudas"
                 active={pathname.startsWith("/debts")}
+              />
+              <CollapsedDropdownItem
+                href="/investments"
+                icon={TrendingUp}
+                label="Inversiones"
+                active={pathname.startsWith("/investments")}
               />
               <CollapsedDropdownItem
                 href="/net-worth"
