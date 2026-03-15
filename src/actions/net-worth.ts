@@ -478,6 +478,14 @@ export async function getAccountNetWorth(
 
     if (txError) return { error: txError.message };
 
+    // 4b. Inversiones — sumar total_cost por cuenta
+    const { data: invRows, error: invError } = await supabase
+      .from("investments")
+      .select("account_id, total_cost, currency")
+      .eq("user_id", userId);
+
+    if (invError) return { error: invError.message };
+
     // Acumular movimientos por account_id
     const movByAccount = new Map<
       string,
@@ -500,6 +508,13 @@ export async function getAccountNetWorth(
       }
     }
 
+    // Acumular valor de inversiones por cuenta (total_cost = valor de libro)
+    const invByAccount = new Map<string, number>();
+    for (const inv of invRows ?? []) {
+      const cur = invByAccount.get(inv.account_id) ?? 0;
+      invByAccount.set(inv.account_id, cur + Number(inv.total_cost));
+    }
+
     // 5. Opening balances por cuenta
     const obByAccount = new Map<
       string,
@@ -512,16 +527,50 @@ export async function getAccountNetWorth(
       });
     }
 
-    // 6. Calcular saldo de cierre por cuenta
+    // 5b. Obtener base currency del usuario
+    const { data: userPref } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrency = userPref?.base_currency ?? "EUR";
+
+    // 5c. Obtener últimas tasas FX para convertir inversiones a base
+    const invCurrencies = [
+      ...new Set((accounts ?? []).map((a) => a.currency).filter((c) => c !== baseCurrency)),
+    ];
+    const fxMap = new Map<string, number>();
+    fxMap.set(baseCurrency, 1);
+    if (invCurrencies.length > 0) {
+      const { data: fxRows } = await supabase
+        .from("fx_rates")
+        .select("from_currency, rate, rate_date")
+        .in("from_currency", invCurrencies)
+        .eq("to_currency", baseCurrency)
+        .order("rate_date", { ascending: false });
+
+      for (const fx of fxRows ?? []) {
+        if (!fxMap.has(fx.from_currency)) {
+          fxMap.set(fx.from_currency, Number(fx.rate));
+        }
+      }
+    }
+
+    // 6. Calcular saldo de cierre por cuenta + inversiones
     let total = 0;
     const accountResults = (accounts ?? []).map((acc) => {
       const ob = obByAccount.get(acc.id) ?? { opening: 0, opening_base: 0 };
       const mov = movByAccount.get(acc.id) ?? { amount: 0, base_amount: 0 };
+      const invValue = invByAccount.get(acc.id) ?? 0;
 
       const balance = ob.opening + mov.amount;
       const balanceBase = ob.opening_base + mov.base_amount;
 
-      total += balanceBase;
+      // Convertir inversiones a base currency usando FX rate
+      const fxRate = fxMap.get(acc.currency) ?? 1;
+      const invValueBase = invValue * fxRate;
+
+      total += balanceBase + invValueBase;
 
       const currencyRaw = acc.currencies;
       const currency = Array.isArray(currencyRaw)
@@ -538,6 +587,8 @@ export async function getAccountNetWorth(
         currency_symbol: symbol,
         balance,
         balance_base: balanceBase,
+        investment_value: invValue,
+        investment_value_base: invValueBase,
       };
     });
 
@@ -677,8 +728,8 @@ export async function getNetWorthEvolution(
     const accountIds = (accountsRes.data ?? []).map((a) => a.id);
     const liabilityIds = (liabilityItemsRes.data ?? []).map((i) => i.id);
 
-    // 3. Batch fetch ALL openings + transactions + liability snapshots for the year
-    const [allOpeningsRes, allTxRes, liabilitySnapsRes] = await Promise.all([
+    // 3. Batch fetch ALL openings + transactions + liability snapshots + investments for the year
+    const [allOpeningsRes, allTxRes, liabilitySnapsRes, investmentsRes, userPrefRes] = await Promise.all([
       accountIds.length > 0
         ? supabase
             .from("opening_balances")
@@ -701,7 +752,60 @@ export async function getNetWorthEvolution(
             .eq("year", year)
             .order("month")
         : Promise.resolve({ data: [] as any[] }),
+      supabase
+        .from("investments")
+        .select("total_cost, currency, purchase_date")
+        .eq("user_id", userId),
+      supabase
+        .from("user_preferences")
+        .select("base_currency")
+        .eq("user_id", userId)
+        .maybeSingle(),
     ]);
+
+    const baseCurrency = (userPrefRes.data as any)?.base_currency ?? "EUR";
+
+    // 3b. Get FX rates for investment currencies
+    const invCurrencies = [
+      ...new Set(
+        ((investmentsRes.data ?? []) as any[])
+          .map((i: any) => i.currency as string)
+          .filter((c: string) => c !== baseCurrency)
+      ),
+    ];
+    const fxMap = new Map<string, number>();
+    fxMap.set(baseCurrency, 1);
+    if (invCurrencies.length > 0) {
+      const { data: fxRows } = await supabase
+        .from("fx_rates")
+        .select("from_currency, rate, rate_date")
+        .in("from_currency", invCurrencies)
+        .eq("to_currency", baseCurrency)
+        .order("rate_date", { ascending: false });
+      for (const fx of fxRows ?? []) {
+        if (!fxMap.has(fx.from_currency)) {
+          fxMap.set(fx.from_currency, Number(fx.rate));
+        }
+      }
+    }
+
+    // 3c. Group investments by month (purchases up to each month of the year)
+    const invByMonth = new Map<number, number>();
+    for (const inv of (investmentsRes.data ?? []) as any[]) {
+      const purchaseDate = new Date(inv.purchase_date);
+      const invYear = purchaseDate.getFullYear();
+      const invMonth = purchaseDate.getMonth() + 1;
+      const fxRate = fxMap.get(inv.currency as string) ?? 1;
+      const valueBase = Number(inv.total_cost) * fxRate;
+
+      // If investment was purchased this year, it applies from its purchase month onward
+      // If purchased before this year, it applies to all months
+      for (const m of monthRows) {
+        if (invYear < year || (invYear === year && invMonth <= m.month)) {
+          invByMonth.set(m.month, (invByMonth.get(m.month) ?? 0) + valueBase);
+        }
+      }
+    }
 
     // 4. Group openings by month_id
     const openingsByMonth = new Map<string, number>();
@@ -739,7 +843,9 @@ export async function getNetWorthEvolution(
     const points: NetWorthEvolutionPoint[] = [];
 
     for (const m of monthRows) {
-      const assets = (openingsByMonth.get(m.id) ?? 0) + (txByMonth.get(m.id) ?? 0);
+      const cashAssets = (openingsByMonth.get(m.id) ?? 0) + (txByMonth.get(m.id) ?? 0);
+      const investmentAssets = invByMonth.get(m.month) ?? 0;
+      const assets = cashAssets + investmentAssets;
 
       let liabilities = 0;
       for (const itemId of liabilityIds) {
