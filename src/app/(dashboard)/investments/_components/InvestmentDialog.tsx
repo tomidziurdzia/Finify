@@ -32,7 +32,7 @@ import {
   useCreateInvestment,
   useUpdateInvestment,
 } from "@/hooks/useInvestments";
-import { formatMoneyInput, parseMoneyInput } from "@/lib/format";
+import { formatNumberInput, numberToInputString, parseNumberInput } from "@/lib/utils";
 import {
   ASSET_TYPES,
   ASSET_TYPE_LABELS,
@@ -110,6 +110,8 @@ export function InvestmentDialog({
   );
 
   const isBroker = selectedAccount?.account_type === "investment_broker";
+  const isCrypto = form.watch("asset_type") === "crypto";
+  const maxDec = 7;
 
   useEffect(() => {
     if (!open) return;
@@ -119,15 +121,9 @@ export function InvestmentDialog({
         asset_name: investment.asset_name,
         ticker: investment.ticker ?? "",
         asset_type: investment.asset_type,
-        quantity: formatMoneyInput(
-          String(investment.quantity).replace(".", ",")
-        ),
-        price_per_unit: formatMoneyInput(
-          String(investment.price_per_unit).replace(".", ",")
-        ),
-        total_cost: formatMoneyInput(
-          String(investment.total_cost).replace(".", ",")
-        ),
+        quantity: numberToInputString(investment.quantity),
+        price_per_unit: numberToInputString(investment.price_per_unit),
+        total_cost: numberToInputString(investment.total_cost),
         currency: investment.currency,
         purchase_date: investment.purchase_date,
         notes: investment.notes ?? "",
@@ -158,43 +154,42 @@ export function InvestmentDialog({
   }, [selectedAccount, form, isEditing]);
 
   const recalcTotal = useCallback((qtyStr: string, priceStr: string) => {
-    const qty = parseMoneyInput(qtyStr);
-    const price = parseMoneyInput(priceStr);
+    const qty = parseNumberInput(qtyStr);
+    const price = parseNumberInput(priceStr);
     if (qty && price && qty > 0 && price > 0) {
-      const total = Math.round(qty * price * 100) / 100;
-      form.setValue(
-        "total_cost",
-        formatMoneyInput(String(total).replace(".", ","))
-      );
+      const decimals = 7;
+      const factor = Math.pow(10, decimals);
+      const total = Math.round(qty * price * factor) / factor;
+      form.setValue("total_cost", numberToInputString(total));
     }
   }, [form]);
 
-  const handleQuantityChange = useCallback((val: string) => {
-    const formatted = formatMoneyInput(val);
+  const handleQuantityChange = useCallback((val: string, decimals: number) => {
+    const formatted = formatNumberInput(val, decimals);
     form.setValue("quantity", formatted);
     recalcTotal(formatted, form.getValues("price_per_unit"));
   }, [form, recalcTotal]);
 
-  const handlePriceChange = useCallback((val: string) => {
-    const formatted = formatMoneyInput(val);
+  const handlePriceChange = useCallback((val: string, decimals: number) => {
+    const formatted = formatNumberInput(val, decimals);
     form.setValue("price_per_unit", formatted);
     recalcTotal(form.getValues("quantity"), formatted);
   }, [form, recalcTotal]);
 
   const onSubmit = async (values: InvestmentFormValues) => {
-    const quantity = parseMoneyInput(values.quantity);
-    const pricePerUnit = parseMoneyInput(values.price_per_unit);
-    const totalCost = parseMoneyInput(values.total_cost);
+    const quantity = parseNumberInput(values.quantity);
+    const pricePerUnit = parseNumberInput(values.price_per_unit);
+    const totalCost = parseNumberInput(values.total_cost);
 
-    if (!quantity || quantity <= 0) {
+    if (!quantity || isNaN(quantity) || quantity <= 0) {
       form.setError("quantity", { message: "Cantidad inválida" });
       return;
     }
-    if (!pricePerUnit || pricePerUnit <= 0) {
+    if (!pricePerUnit || isNaN(pricePerUnit) || pricePerUnit <= 0) {
       form.setError("price_per_unit", { message: "Precio inválido" });
       return;
     }
-    if (!totalCost || totalCost <= 0) {
+    if (!totalCost || isNaN(totalCost) || totalCost <= 0) {
       form.setError("total_cost", { message: "Costo total inválido" });
       return;
     }
@@ -381,7 +376,7 @@ export function InvestmentDialog({
                         placeholder="0"
                         disabled={isPending}
                         value={field.value}
-                        onChange={(e) => handleQuantityChange(e.target.value)}
+                        onChange={(e) => handleQuantityChange(e.target.value, maxDec)}
                       />
                     </FormControl>
                     <FormMessage />
@@ -402,7 +397,7 @@ export function InvestmentDialog({
                         placeholder="0,00"
                         disabled={isPending}
                         value={field.value}
-                        onChange={(e) => handlePriceChange(e.target.value)}
+                        onChange={(e) => handlePriceChange(e.target.value, maxDec)}
                       />
                     </FormControl>
                     <FormMessage />
@@ -426,7 +421,7 @@ export function InvestmentDialog({
                         onChange={(e) =>
                           form.setValue(
                             "total_cost",
-                            formatMoneyInput(e.target.value)
+                            formatNumberInput(e.target.value, maxDec)
                           )
                         }
                       />

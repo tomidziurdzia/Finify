@@ -92,7 +92,7 @@ export default function NetWorthPage() {
       }
       const group = map.get(type)!;
       group.accounts.push(acc);
-      group.total += acc.balance_base;
+      group.total += acc.balance_base + acc.investment_value_base;
     }
     return Array.from(map.values());
   }, [assetsSummary]);
@@ -208,24 +208,35 @@ export default function NetWorthPage() {
                         {currencySymbol} {formatAmount(group.total)}
                       </span>
                     </div>
-                    {group.accounts.map((acc) => (
-                      <div
-                        key={acc.id}
-                        className="flex items-center justify-between border-b px-4 py-3 last:border-b-0"
-                      >
-                        <span className="text-sm font-medium">{acc.name}</span>
-                        <div className="text-right">
-                          <span className="text-sm font-medium">
-                            {acc.currency_symbol} {formatAmount(acc.balance)}
-                          </span>
-                          {acc.currency !== baseCurrency && (
-                            <span className="text-muted-foreground ml-2 text-xs">
-                              ≈ {currencySymbol} {formatAmount(acc.balance_base)}
+                    {group.accounts.map((acc) => {
+                      const totalValue = acc.balance + acc.investment_value;
+                      const totalValueBase = acc.balance_base + acc.investment_value_base;
+                      return (
+                        <div
+                          key={acc.id}
+                          className="flex items-center justify-between border-b px-4 py-3 last:border-b-0"
+                        >
+                          <div>
+                            <span className="text-sm font-medium">{acc.name}</span>
+                            {acc.investment_value > 0 && (
+                              <span className="text-muted-foreground ml-2 text-xs">
+                                (inv: {acc.currency_symbol} {formatAmount(acc.investment_value)})
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm font-medium">
+                              {acc.currency_symbol} {formatAmount(totalValue)}
                             </span>
-                          )}
+                            {acc.currency !== baseCurrency && (
+                              <span className="text-muted-foreground ml-2 text-xs">
+                                ≈ {currencySymbol} {formatAmount(totalValueBase)}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ))
               )}

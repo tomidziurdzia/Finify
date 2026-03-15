@@ -86,6 +86,8 @@ export interface AccountNetWorthSummary {
     currency_symbol: string;
     balance: number;
     balance_base: number;
+    investment_value: number;
+    investment_value_base: number;
   }[];
 }
 
