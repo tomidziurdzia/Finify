@@ -32,6 +32,7 @@ import {
   useCreateInvestment,
   useUpdateInvestment,
 } from "@/hooks/useInvestments";
+import { AccountCombobox } from "@/components/account-combobox";
 import { formatNumberInput, numberToInputString, parseNumberInput } from "@/lib/utils";
 import {
   ASSET_TYPES,
@@ -146,10 +147,15 @@ export function InvestmentDialog({
     }
   }, [investment, open, form, investmentAccounts]);
 
-  // Auto-set currency when account changes
+  // Auto-set currency when account changes (skip for crypto accounts)
   useEffect(() => {
     if (selectedAccount && !isEditing) {
-      form.setValue("currency", selectedAccount.currency);
+      const isCryptoAccount = ["crypto_exchange", "crypto_wallet"].includes(
+        selectedAccount.account_type
+      );
+      if (!isCryptoAccount) {
+        form.setValue("currency", selectedAccount.currency);
+      }
     }
   }, [selectedAccount, form, isEditing]);
 
@@ -257,22 +263,12 @@ export function InvestmentDialog({
                 <FormItem>
                   <FormLabel>Cuenta</FormLabel>
                   <FormControl>
-                    <Select
+                    <AccountCombobox
+                      accounts={investmentAccounts}
                       value={field.value}
                       onValueChange={field.onChange}
                       disabled={isPending}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar cuenta" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {investmentAccounts.map((acc) => (
-                          <SelectItem key={acc.id} value={acc.id}>
-                            {acc.name} ({acc.currency})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

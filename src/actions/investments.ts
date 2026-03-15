@@ -237,7 +237,7 @@ export async function updateInvestment(
     if (!userId) return { error: "No autenticado" };
 
     const supabase = await createClient();
-    const { id, ...updates } = parsed.data;
+    const { id, skip_deduction: _, ...updates } = parsed.data;
     const clean = Object.fromEntries(
       Object.entries(updates).filter(
         ([_, v]) => v !== undefined && v !== null

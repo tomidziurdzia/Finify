@@ -5,6 +5,7 @@ import {
   getTransactions,
   getTransactionsForRange,
   getBaseCurrency,
+  getUsageCounts,
   createTransaction,
   createTransfer,
   updateTransaction,
@@ -30,6 +31,18 @@ export function useBaseCurrency() {
       return result.data;
     },
     staleTime: Infinity,
+  });
+}
+
+export function useUsageCounts() {
+  return useQuery({
+    queryKey: ["usage-counts"],
+    queryFn: async () => {
+      const result = await getUsageCounts();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
   });
 }
 

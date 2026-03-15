@@ -30,11 +30,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
-import { useBaseCurrency } from "@/hooks/useTransactions";
+import { useBaseCurrency, useUsageCounts } from "@/hooks/useTransactions";
+import { AccountCombobox } from "@/components/account-combobox";
 import { useBudgetCategories } from "@/hooks/useBudget";
 import { useCreateRecurring, useUpdateRecurring } from "@/hooks/useRecurring";
 import { CategoryCombobox } from "@/components/category-combobox";
-import { formatMoneyInput, parseMoneyInput } from "@/lib/format";
+import { formatMoneyInput, formatMoneyDisplay, parseMoneyInput } from "@/lib/format";
 import {
   RECURRENCE_LABELS,
   RECURRENCE_OPTIONS,
@@ -88,6 +89,10 @@ export function RecurringDialog({
   const { data: currencies } = useCurrencies();
   const { data: baseCurrency } = useBaseCurrency();
   const { data: categories } = useBudgetCategories();
+  const { data: usageCounts } = useUsageCounts();
+  const sortedAccounts = [...(accounts ?? [])].sort(
+    (a, b) => (usageCounts?.accountCounts[b.id] ?? 0) - (usageCounts?.accountCounts[a.id] ?? 0)
+  );
   const createMutation = useCreateRecurring();
   const updateMutation = useUpdateRecurring();
 
@@ -101,7 +106,7 @@ export function RecurringDialog({
         type: recurring.type,
         category_id: recurring.category_id ?? "",
         account_id: recurring.account_id,
-        amount: formatMoneyInput(String(recurring.amount).replace(".", ",")),
+        amount: formatMoneyDisplay(String(recurring.amount).replace(".", ",")),
         currency: recurring.currency,
         recurrence: recurring.recurrence,
         day_of_month: recurring.day_of_month?.toString() ?? "",
@@ -371,22 +376,12 @@ export function RecurringDialog({
                 <FormItem>
                   <FormLabel>Cuenta</FormLabel>
                   <FormControl>
-                    <Select
+                    <AccountCombobox
+                      accounts={sortedAccounts}
                       value={field.value}
                       onValueChange={field.onChange}
                       disabled={isPending}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar cuenta" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(accounts ?? []).map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -407,6 +402,7 @@ export function RecurringDialog({
                       allowEmpty
                       emptyLabel="Sin categoría"
                       disabled={isPending}
+                      usageCounts={usageCounts?.categoryCounts}
                     />
                   </FormControl>
                   <FormMessage />

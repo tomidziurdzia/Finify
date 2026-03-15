@@ -209,7 +209,6 @@ export default function NetWorthPage() {
                       </span>
                     </div>
                     {group.accounts.map((acc) => {
-                      const totalValue = acc.balance + acc.investment_value;
                       const totalValueBase = acc.balance_base + acc.investment_value_base;
                       return (
                         <div
@@ -218,21 +217,16 @@ export default function NetWorthPage() {
                         >
                           <div>
                             <span className="text-sm font-medium">{acc.name}</span>
-                            {acc.investment_value > 0 && (
+                            {acc.investment_value_base > 0 && (
                               <span className="text-muted-foreground ml-2 text-xs">
-                                (inv: {acc.currency_symbol} {formatAmount(acc.investment_value)})
+                                (inv: {currencySymbol} {formatAmount(acc.investment_value_base)})
                               </span>
                             )}
                           </div>
                           <div className="text-right">
                             <span className="text-sm font-medium">
-                              {acc.currency_symbol} {formatAmount(totalValue)}
+                              {currencySymbol} {formatAmount(totalValueBase)}
                             </span>
-                            {acc.currency !== baseCurrency && (
-                              <span className="text-muted-foreground ml-2 text-xs">
-                                ≈ {currencySymbol} {formatAmount(totalValueBase)}
-                              </span>
-                            )}
                           </div>
                         </div>
                       );

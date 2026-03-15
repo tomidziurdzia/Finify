@@ -17,6 +17,8 @@ import type {
   NetWorthEvolutionPoint,
 } from "@/types/net-worth";
 
+import { fetchExchangeRate } from "@/lib/frankfurter";
+
 type ActionResult<T> = { data: T } | { error: string };
 
 async function getUserId() {
@@ -25,6 +27,54 @@ async function getUserId() {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+/**
+ * Build an FX rate map for converting currencies to baseCurrency.
+ * First tries the fx_rates cache table, then falls back to Frankfurter API.
+ */
+async function buildFxMap(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  currencies: string[],
+  baseCurrency: string
+): Promise<Map<string, number>> {
+  const fxMap = new Map<string, number>();
+  fxMap.set(baseCurrency, 1);
+
+  const nonBase = currencies.filter((c) => c !== baseCurrency);
+  if (nonBase.length === 0) return fxMap;
+
+  // Try cached rates first
+  const { data: fxRows } = await supabase
+    .from("fx_rates")
+    .select("from_currency, rate")
+    .in("from_currency", nonBase)
+    .eq("to_currency", baseCurrency)
+    .order("rate_date", { ascending: false });
+
+  for (const fx of fxRows ?? []) {
+    if (!fxMap.has(fx.from_currency)) {
+      fxMap.set(fx.from_currency, Number(fx.rate));
+    }
+  }
+
+  // For any missing currencies, fetch from Frankfurter API
+  const missing = nonBase.filter((c) => !fxMap.has(c));
+  if (missing.length > 0) {
+    await Promise.all(
+      missing.map(async (currency) => {
+        try {
+          const rate = await fetchExchangeRate(currency, baseCurrency);
+          if (rate != null) fxMap.set(currency, rate);
+        } catch {
+          // Leave missing — will fallback to 1
+        }
+      })
+    );
+  }
+
+  return fxMap;
 }
 
 export async function getNwItems(): Promise<
@@ -211,13 +261,31 @@ export async function getNwSnapshotsForMonth(
       snapshots.map((s) => [s.nw_item_id, s])
     );
 
+    // Fetch base currency
+    const { data: userPref } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrency = (userPref as { base_currency?: string })?.base_currency ?? "EUR";
+
+    const itemCurrencies = [...new Set((items ?? []).map((i) => i.currency as string))];
+    const fxMap = await buildFxMap(supabase, itemCurrencies, baseCurrency);
+
     let totalAssets = 0;
     let totalLiabilities = 0;
 
     const summaryItems = (items ?? []).map((item) => {
       const snap = snapByItem.get(item.id);
       const amount = snap?.amount ?? 0;
-      const amountBase = snap?.amount_base ?? null;
+      let amountBase = snap?.amount_base ?? null;
+
+      // Always recalculate amount_base for non-base currencies using live FX rate
+      if (amount !== 0 && item.currency !== baseCurrency) {
+        const rate = fxMap.get(item.currency as string) ?? 1;
+        amountBase = amount * rate;
+      }
+
       const currencyRaw = item.currencies;
       const currency = Array.isArray(currencyRaw) ? currencyRaw[0] : currencyRaw;
       const symbol = (currency as { symbol?: string })?.symbol ?? item.currency;
@@ -315,14 +383,32 @@ export async function getNwSnapshotsForYear(
       }
     }
 
+    // Fetch base currency
+    const { data: userPrefYear } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrencyYear = (userPrefYear as { base_currency?: string })?.base_currency ?? "EUR";
+
+    const itemCurrenciesYear = [...new Set((items ?? []).map((i) => i.currency as string))];
+    const fxMapYear = await buildFxMap(supabase, itemCurrenciesYear, baseCurrencyYear);
+
     let totalAssets = 0;
     let totalLiabilities = 0;
 
     const summaryItems = (items ?? []).map((item) => {
       const snap = snapByItem.get(item.id);
       const amount = snap?.amount ?? 0;
-      const amountBase = snap?.amount_base ?? null;
+      let amountBase = snap?.amount_base ?? null;
       const snapshotMonth = snap?.month ?? 0;
+
+      // Always recalculate amount_base for non-base currencies using live FX rate
+      if (amount !== 0 && item.currency !== baseCurrencyYear) {
+        const rate = fxMapYear.get(item.currency as string) ?? 1;
+        amountBase = amount * rate;
+      }
+
       const currencyRaw = item.currencies;
       const currency = Array.isArray(currencyRaw)
         ? currencyRaw[0]
@@ -508,13 +594,6 @@ export async function getAccountNetWorth(
       }
     }
 
-    // Acumular valor de inversiones por cuenta (total_cost = valor de libro)
-    const invByAccount = new Map<string, number>();
-    for (const inv of invRows ?? []) {
-      const cur = invByAccount.get(inv.account_id) ?? 0;
-      invByAccount.set(inv.account_id, cur + Number(inv.total_cost));
-    }
-
     // 5. Opening balances por cuenta
     const obByAccount = new Map<
       string,
@@ -536,24 +615,21 @@ export async function getAccountNetWorth(
     const baseCurrency = userPref?.base_currency ?? "EUR";
 
     // 5c. Obtener últimas tasas FX para convertir inversiones a base
-    const invCurrencies = [
-      ...new Set((accounts ?? []).map((a) => a.currency).filter((c) => c !== baseCurrency)),
+    const allCurrencies = [
+      ...new Set([
+        ...(accounts ?? []).map((a) => a.currency),
+        ...(invRows ?? []).map((i) => i.currency),
+      ]),
     ];
-    const fxMap = new Map<string, number>();
-    fxMap.set(baseCurrency, 1);
-    if (invCurrencies.length > 0) {
-      const { data: fxRows } = await supabase
-        .from("fx_rates")
-        .select("from_currency, rate, rate_date")
-        .in("from_currency", invCurrencies)
-        .eq("to_currency", baseCurrency)
-        .order("rate_date", { ascending: false });
+    const fxMap = await buildFxMap(supabase, allCurrencies, baseCurrency);
 
-      for (const fx of fxRows ?? []) {
-        if (!fxMap.has(fx.from_currency)) {
-          fxMap.set(fx.from_currency, Number(fx.rate));
-        }
-      }
+    // Acumular valor de inversiones por cuenta, convirtiendo cada inversión
+    // a base currency usando su propia moneda (no la de la cuenta)
+    const invByAccountBase = new Map<string, number>();
+    for (const inv of invRows ?? []) {
+      const fxRate = fxMap.get(inv.currency) ?? 1;
+      const valueBase = Number(inv.total_cost) * fxRate;
+      invByAccountBase.set(inv.account_id, (invByAccountBase.get(inv.account_id) ?? 0) + valueBase);
     }
 
     // 6. Calcular saldo de cierre por cuenta + inversiones
@@ -561,14 +637,12 @@ export async function getAccountNetWorth(
     const accountResults = (accounts ?? []).map((acc) => {
       const ob = obByAccount.get(acc.id) ?? { opening: 0, opening_base: 0 };
       const mov = movByAccount.get(acc.id) ?? { amount: 0, base_amount: 0 };
-      const invValue = invByAccount.get(acc.id) ?? 0;
 
       const balance = ob.opening + mov.amount;
       const balanceBase = ob.opening_base + mov.base_amount;
 
-      // Convertir inversiones a base currency usando FX rate
-      const fxRate = fxMap.get(acc.currency) ?? 1;
-      const invValueBase = invValue * fxRate;
+      // Inversiones ya convertidas a base currency per-inversión
+      const invValueBase = invByAccountBase.get(acc.id) ?? 0;
 
       total += balanceBase + invValueBase;
 
@@ -587,7 +661,7 @@ export async function getAccountNetWorth(
         currency_symbol: symbol,
         balance,
         balance_base: balanceBase,
-        investment_value: invValue,
+        investment_value: invValueBase,
         investment_value_base: invValueBase,
       };
     });
@@ -655,11 +729,29 @@ export async function getLiabilitiesForYear(
       }
     }
 
+    // Fetch base currency
+    const { data: userPrefLiab } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrencyLiab = (userPrefLiab as { base_currency?: string })?.base_currency ?? "EUR";
+
+    const itemCurrenciesLiab = [...new Set((items ?? []).map((i) => i.currency as string))];
+    const fxMapLiab = await buildFxMap(supabase, itemCurrenciesLiab, baseCurrencyLiab);
+
     let total = 0;
     const summaryItems = (items ?? []).map((item) => {
       const snap = latestByItem.get(item.id);
       const amount = snap?.amount ?? 0;
-      const amountBase = snap?.amount_base ?? null;
+      let amountBase = snap?.amount_base ?? null;
+
+      // Always recalculate amount_base for non-base currencies using live FX rate
+      if (amount !== 0 && item.currency !== baseCurrencyLiab) {
+        const rate = fxMapLiab.get(item.currency as string) ?? 1;
+        amountBase = amount * rate;
+      }
+
       const currencyRaw = item.currencies;
       const currency = Array.isArray(currencyRaw)
         ? currencyRaw[0]
@@ -720,7 +812,7 @@ export async function getNetWorthEvolution(
         .eq("is_active", true),
       supabase
         .from("nw_items")
-        .select("id")
+        .select("id, currency")
         .eq("user_id", userId)
         .eq("side", "liability"),
     ]);
@@ -765,29 +857,14 @@ export async function getNetWorthEvolution(
 
     const baseCurrency = (userPrefRes.data as any)?.base_currency ?? "EUR";
 
-    // 3b. Get FX rates for investment currencies
-    const invCurrencies = [
-      ...new Set(
-        ((investmentsRes.data ?? []) as any[])
-          .map((i: any) => i.currency as string)
-          .filter((c: string) => c !== baseCurrency)
-      ),
+    // 3b. Get FX rates for investment + liability currencies
+    const allEvolutionCurrencies = [
+      ...new Set([
+        ...((investmentsRes.data ?? []) as any[]).map((i: any) => i.currency as string),
+        ...(liabilityItemsRes.data ?? []).map((i: any) => i.currency as string).filter(Boolean),
+      ]),
     ];
-    const fxMap = new Map<string, number>();
-    fxMap.set(baseCurrency, 1);
-    if (invCurrencies.length > 0) {
-      const { data: fxRows } = await supabase
-        .from("fx_rates")
-        .select("from_currency, rate, rate_date")
-        .in("from_currency", invCurrencies)
-        .eq("to_currency", baseCurrency)
-        .order("rate_date", { ascending: false });
-      for (const fx of fxRows ?? []) {
-        if (!fxMap.has(fx.from_currency)) {
-          fxMap.set(fx.from_currency, Number(fx.rate));
-        }
-      }
-    }
+    const fxMap = await buildFxMap(supabase, allEvolutionCurrencies, baseCurrency);
 
     // 3c. Group investments by month (purchases up to each month of the year)
     const invByMonth = new Map<number, number>();
@@ -829,10 +906,23 @@ export async function getNetWorthEvolution(
     }
 
     // 6. Pre-process liability snapshots into Map<itemId, Map<month, value>>
+    const liabCurrencyMap = new Map<string, string>();
+    for (const i of (liabilityItemsRes.data ?? []) as any[]) {
+      liabCurrencyMap.set(i.id as string, i.currency as string);
+    }
+
     const liabilitySnapsByItem = new Map<string, { month: number; value: number }[]>();
     for (const s of (liabilitySnapsRes.data ?? []) as any[]) {
       const itemId = s.nw_item_id as string;
-      const value = s.amount_base != null ? Number(s.amount_base) : Number(s.amount);
+      // Always recalculate using live FX rate for non-base currencies
+      const itemCurrency = liabCurrencyMap.get(itemId);
+      let value: number;
+      if (itemCurrency && itemCurrency !== baseCurrency) {
+        const rate = fxMap.get(itemCurrency) ?? 1;
+        value = Number(s.amount) * rate;
+      } else {
+        value = Number(s.amount_base ?? s.amount);
+      }
       if (!liabilitySnapsByItem.has(itemId)) {
         liabilitySnapsByItem.set(itemId, []);
       }

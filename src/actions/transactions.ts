@@ -69,6 +69,49 @@ export async function getBaseCurrency(): Promise<ActionResult<string>> {
   }
 }
 
+// --- USAGE COUNTS (for sorting selectors) ---
+export async function getUsageCounts(): Promise<
+  ActionResult<{ accountCounts: Record<string, number>; categoryCounts: Record<string, number> }>
+> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "No autenticado" };
+
+    // Count transactions per account via transaction_amounts
+    const { data: accountRows } = await supabase
+      .from("transaction_amounts")
+      .select("account_id, transactions!inner(user_id)")
+      .eq("transactions.user_id", user.id);
+
+    const accountCounts: Record<string, number> = {};
+    for (const row of accountRows ?? []) {
+      accountCounts[row.account_id] = (accountCounts[row.account_id] ?? 0) + 1;
+    }
+
+    // Count transactions per category
+    const { data: categoryRows } = await supabase
+      .from("transactions")
+      .select("category_id")
+      .eq("user_id", user.id)
+      .not("category_id", "is", null)
+      .is("deleted_at", null);
+
+    const categoryCounts: Record<string, number> = {};
+    for (const row of categoryRows ?? []) {
+      if (row.category_id) {
+        categoryCounts[row.category_id] = (categoryCounts[row.category_id] ?? 0) + 1;
+      }
+    }
+
+    return { data: { accountCounts, categoryCounts } };
+  } catch {
+    return { error: "Error al obtener conteos de uso" };
+  }
+}
+
 // --- GET TRANSACTIONS (by month) ---
 export async function getTransactions(
   monthId: string

@@ -20,18 +20,13 @@ import {
   FormControl,
   FormMessage,
 } from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
 import {
   useCreateTransfer,
   useUpdateTransaction,
+  useUsageCounts,
 } from "@/hooks/useTransactions";
+import { AccountCombobox } from "@/components/account-combobox";
 import { CreateTransferSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
 import { fetchExchangeRate } from "@/lib/frankfurter";
@@ -86,7 +81,11 @@ export function TransferDialog({
   const isPending =
     createTransferMutation.isPending || updateMutation.isPending;
 
+  const { data: usageCounts } = useUsageCounts();
   const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
+  const sortedAccounts = [...activeAccounts].sort(
+    (a, b) => (usageCounts?.accountCounts[b.id] ?? 0) - (usageCounts?.accountCounts[a.id] ?? 0)
+  );
 
   const watchSourceId = form.watch("source_account_id");
   const watchDestId = form.watch("destination_account_id");
@@ -389,7 +388,8 @@ export function TransferDialog({
                   <FormItem>
                     <FormLabel>Cuenta origen</FormLabel>
                     <FormControl>
-                      <Select
+                      <AccountCombobox
+                        accounts={sortedAccounts}
                         value={field.value}
                         onValueChange={(val) => {
                           field.onChange(val);
@@ -398,18 +398,8 @@ export function TransferDialog({
                           }
                         }}
                         disabled={isPending || isEditing}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {activeAccounts.map((a) => (
-                            <SelectItem key={a.id} value={a.id}>
-                              {a.name} ({a.currency})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Seleccionar"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -422,22 +412,13 @@ export function TransferDialog({
                   <FormItem>
                     <FormLabel>Cuenta destino</FormLabel>
                     <FormControl>
-                      <Select
+                      <AccountCombobox
+                        accounts={sortedAccounts.filter((a) => a.id !== watchSourceId)}
                         value={field.value}
                         onValueChange={field.onChange}
                         disabled={isPending || isEditing}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {filteredDestAccounts.map((a) => (
-                            <SelectItem key={a.id} value={a.id}>
-                              {a.name} ({a.currency})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Seleccionar"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

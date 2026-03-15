@@ -54,8 +54,32 @@ export function parseMoneyInput(value: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-/** Format a raw money input string by parsing and re-formatting it. */
+/**
+ * Sanitize a money input string while the user types.
+ * Allows digits, a single comma as decimal separator, and dots as thousand separators.
+ * Does NOT force decimal places — that would make typing impossible.
+ */
 export function formatMoneyInput(value: string): string {
+  // Strip everything except digits, commas, and dots
+  let cleaned = value.replace(/[^0-9.,]/g, "");
+
+  // Treat dots as thousand separators and commas as decimal separator (es-AR).
+  // If there are multiple commas, keep only the last one as decimal.
+  const commaIdx = cleaned.lastIndexOf(",");
+  if (commaIdx !== -1) {
+    const beforeComma = cleaned.slice(0, commaIdx).replace(/,/g, "");
+    const afterComma = cleaned.slice(commaIdx + 1).replace(/,/g, "").replace(/\./g, "");
+    cleaned = beforeComma + "," + afterComma;
+  }
+
+  return cleaned;
+}
+
+/**
+ * Format a raw money input string by parsing and re-formatting it with full decimals.
+ * Use this for pre-populating fields (on load / reset), NOT during typing.
+ */
+export function formatMoneyDisplay(value: string): string {
   const parsed = parseMoneyInput(value);
   if (parsed == null) return "";
   return formatAmount(parsed);

@@ -34,7 +34,9 @@ import {
   useCreateTransaction,
   useUpdateTransaction,
   useBaseCurrency,
+  useUsageCounts,
 } from "@/hooks/useTransactions";
+import { AccountCombobox } from "@/components/account-combobox";
 import { useMatchRules } from "@/hooks/useTransactionRules";
 import { CreateTransactionSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
@@ -111,7 +113,11 @@ export function TransactionDialog({
 
   const fetchingRateRef = useRef(false);
 
+  const { data: usageCounts } = useUsageCounts();
   const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
+  const sortedAccounts = [...activeAccounts].sort(
+    (a, b) => (usageCounts?.accountCounts[b.id] ?? 0) - (usageCounts?.accountCounts[a.id] ?? 0)
+  );
 
   const watchTransactionType = form.watch("transaction_type");
   const watchAccountId = form.watch("account_id");
@@ -478,22 +484,12 @@ export function TransactionDialog({
                 <FormItem>
                   <FormFieldLabel>Cuenta</FormFieldLabel>
                   <FormControl>
-                    <Select
+                    <AccountCombobox
+                      accounts={sortedAccounts}
                       value={field.value}
                       onValueChange={field.onChange}
                       disabled={isPending || isEditing}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar cuenta" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeAccounts.map((a) => (
-                          <SelectItem key={a.id} value={a.id}>
-                            {a.name} ({a.currency})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -513,6 +509,7 @@ export function TransactionDialog({
                         onValueChange={field.onChange}
                         grouped
                         disabled={isPending}
+                        usageCounts={usageCounts?.categoryCounts}
                       />
                     </FormControl>
                     <FormMessage />
