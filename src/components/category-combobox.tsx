@@ -32,6 +32,17 @@ interface CategoryComboboxProps {
   emptyLabel?: string;
   grouped?: boolean;
   disabled?: boolean;
+  usageCounts?: Record<string, number>;
+}
+
+function sortByUsage<T extends { id: string }>(
+  items: T[],
+  counts: Record<string, number> | undefined
+): T[] {
+  if (!counts) return items;
+  return [...items].sort(
+    (a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0)
+  );
 }
 
 export function CategoryCombobox({
@@ -43,6 +54,7 @@ export function CategoryCombobox({
   emptyLabel = "Sin categoría",
   grouped = false,
   disabled = false,
+  usageCounts,
 }: CategoryComboboxProps) {
   const [open, setOpen] = useState(false);
 
@@ -61,6 +73,10 @@ export function CategoryCombobox({
       const existing = groups.get(cat.category_type) ?? [];
       existing.push(cat);
       groups.set(cat.category_type, existing);
+    }
+    // Sort categories within each group by usage
+    for (const [type, cats] of groups) {
+      groups.set(type, sortByUsage(cats, usageCounts));
     }
 
     return (
@@ -166,7 +182,7 @@ export function CategoryCombobox({
                 {emptyLabel}
               </CommandItem>
             )}
-            {categories.map((cat) => (
+            {sortByUsage(categories, usageCounts).map((cat) => (
               <CommandItem
                 key={cat.id}
                 value={cat.name}

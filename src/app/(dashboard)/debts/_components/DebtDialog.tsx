@@ -32,7 +32,8 @@ import {
 import { useCreateDebt, useUpdateNwItem, useUpsertNwSnapshot } from "@/hooks/useNetWorth";
 import { useCurrencies } from "@/hooks/useAccounts";
 import { useBaseCurrency } from "@/hooks/useTransactions";
-import { formatMoneyInput, parseMoneyInput } from "@/lib/format";
+import { formatMoneyInput, formatMoneyDisplay, parseMoneyInput } from "@/lib/format";
+import { fetchExchangeRate } from "@/lib/frankfurter";
 import type { NwItemWithRelations } from "@/types/net-worth";
 
 interface DebtDialogProps {
@@ -70,7 +71,7 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
         name: debt.name,
         currency: debt.currency,
         amount: debt.currentAmount
-          ? formatMoneyInput(String(debt.currentAmount).replace(".", ","))
+          ? formatMoneyDisplay(String(debt.currentAmount).replace(".", ","))
           : "",
       });
     } else {
@@ -81,6 +82,19 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
   const onSubmit = async (values: DebtFormValues) => {
     const amount = parseMoneyInput(values.amount) ?? 0;
 
+    // Calculate amount_base for non-base currencies
+    let amountBase: number | null = null;
+    if (values.currency === baseCurrency) {
+      amountBase = amount;
+    } else if (baseCurrency && amount !== 0) {
+      try {
+        const rate = await fetchExchangeRate(values.currency, baseCurrency);
+        if (rate) amountBase = amount * rate;
+      } catch {
+        // If FX fails, leave null — server will convert on read
+      }
+    }
+
     try {
       if (isEditing) {
         await updateItem.mutateAsync({
@@ -88,7 +102,6 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
           name: values.name,
           currency: values.currency,
         });
-        // Guardar snapshot con el monto actual
         const now = new Date();
         const snapshotMonth = now.getFullYear() === year ? now.getMonth() + 1 : 12;
         await upsertSnapshot.mutateAsync({
@@ -96,7 +109,7 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
           year,
           month: snapshotMonth,
           amount,
-          amount_base: values.currency !== baseCurrency ? null : amount,
+          amount_base: amountBase,
         });
       } else {
         const result = await createDebt.mutateAsync({
@@ -105,7 +118,6 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
           account_id: null,
           display_order: 0,
         });
-        // Crear snapshot inicial
         const now = new Date();
         const snapshotMonth = now.getFullYear() === year ? now.getMonth() + 1 : 12;
         await upsertSnapshot.mutateAsync({
@@ -113,7 +125,7 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
           year,
           month: snapshotMonth,
           amount,
-          amount_base: values.currency !== baseCurrency ? null : amount,
+          amount_base: amountBase,
         });
       }
       onOpenChange(false);

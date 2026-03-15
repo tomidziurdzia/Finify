@@ -16,6 +16,7 @@ export interface MonthSummary {
 }
 
 export interface AccountBalance {
+  accountId: string;
   name: string;
   currencyCode: string;
   symbol: string;
@@ -102,6 +103,7 @@ export function useMonthSummary(
 
     for (const ob of openingBalances ?? []) {
       byAccount.set(ob.account_id, {
+        accountId: ob.account_id,
         name: ob.account_name,
         currencyCode: ob.account_currency,
         symbol: ob.account_currency_symbol,
@@ -117,6 +119,7 @@ export function useMonthSummary(
           current.closing += line.amount;
         } else {
           byAccount.set(line.account_id, {
+            accountId: line.account_id,
             name: line.account_name,
             currencyCode: line.original_currency,
             symbol: line.account_currency_symbol,

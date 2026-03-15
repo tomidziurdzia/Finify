@@ -60,6 +60,7 @@ import {
   useDeleteTransaction,
   useBaseCurrency,
 } from "@/hooks/useTransactions";
+import { useInvestments } from "@/hooks/useInvestments";
 import {
   useMonths,
   useEnsureCurrentMonth,
@@ -72,6 +73,7 @@ import {
   TRANSACTION_TYPE_LABELS,
   type TransactionWithRelations,
 } from "@/types/transactions";
+import { BUDGET_CATEGORY_LABELS } from "@/types/budget";
 import { TransactionDialog } from "./TransactionDialog";
 import { TransferDialog } from "./TransferDialog";
 import { parseISO, format } from "date-fns";
@@ -175,6 +177,18 @@ export function TransactionsTable() {
     transactions,
     openingBalances,
   );
+  const { data: allInvestments } = useInvestments();
+
+  // Sum investment total_cost per account (in base currency via currency_symbol)
+  const investmentByAccount = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!allInvestments) return map;
+    for (const inv of allInvestments) {
+      const current = map.get(inv.account_id) ?? 0;
+      map.set(inv.account_id, current + inv.total_cost);
+    }
+    return map;
+  }, [allInvestments]);
 
   const accountFilterOptions = useMemo(() => {
     const values = new Set<string>();
@@ -249,6 +263,13 @@ export function TransactionsTable() {
         enableSorting: false,
         filterFn: "equalsString",
         cell: ({ row }) => row.original.category_name ?? "—",
+      },
+      {
+        accessorKey: "category_type",
+        header: "Tipo de categoría",
+        enableSorting: false,
+        enableHiding: true,
+        filterFn: "equalsString",
       },
       {
         accessorFn: (row) => Math.abs(getPrimaryLine(row)?.amount ?? 0),
@@ -333,6 +354,7 @@ export function TransactionsTable() {
     data: tableTransactions,
     columns,
     state: { sorting, globalFilter, columnFilters, pagination },
+    initialState: { columnVisibility: { category_type: false } },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
@@ -616,34 +638,45 @@ export function TransactionsTable() {
           </p>
           {accountMonthlyBalances.length > 0 ? (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {accountMonthlyBalances.map((account) => (
-                <div
-                  key={account.name}
-                  className="bg-muted/20 space-y-2 rounded-md border px-3 py-2.5"
-                >
-                  <p className="text-foreground truncate text-sm font-semibold">
-                    {account.name} ({account.currencyCode})
-                  </p>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">
-                      Inicio del mes
-                    </span>
-                    <span
-                      className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.opening)}`}
-                    >
-                      {account.symbol} {formatAmount(account.opening)}
-                    </span>
+              {accountMonthlyBalances.map((account) => {
+                const invTotal = investmentByAccount.get(account.accountId) ?? 0;
+                return (
+                  <div
+                    key={account.name}
+                    className="bg-muted/20 space-y-2 rounded-md border px-3 py-2.5"
+                  >
+                    <p className="text-foreground truncate text-sm font-semibold">
+                      {account.name} ({account.currencyCode})
+                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        Inicio del mes
+                      </span>
+                      <span
+                        className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.opening)}`}
+                      >
+                        {account.symbol} {formatAmount(account.opening)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Final del mes</span>
+                      <span
+                        className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.closing)}`}
+                      >
+                        {account.symbol} {formatAmount(account.closing)}
+                      </span>
+                    </div>
+                    {invTotal > 0 && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">Inversiones</span>
+                        <span className="whitespace-nowrap text-sm font-semibold text-indigo-600">
+                          {account.symbol} {formatAmount(invTotal)}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Final del mes</span>
-                    <span
-                      className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.closing)}`}
-                    >
-                      {account.symbol} {formatAmount(account.closing)}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-muted-foreground text-sm">
@@ -730,6 +763,30 @@ export function TransactionsTable() {
             {categoryFilterOptions.map((name) => (
               <SelectItem key={name} value={name}>
                 {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={
+            (table.getColumn("category_type")?.getFilterValue() as string) ??
+            "all"
+          }
+          onValueChange={(value) => {
+            table
+              .getColumn("category_type")
+              ?.setFilterValue(value === "all" ? undefined : value);
+            table.setPageIndex(0);
+          }}
+        >
+          <SelectTrigger className="w-full md:w-52">
+            <SelectValue placeholder="Tipo de gasto" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los tipos</SelectItem>
+            {Object.entries(BUDGET_CATEGORY_LABELS).map(([key, label]) => (
+              <SelectItem key={key} value={key}>
+                {label}
               </SelectItem>
             ))}
           </SelectContent>

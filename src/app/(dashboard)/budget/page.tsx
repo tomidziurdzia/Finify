@@ -37,7 +37,7 @@ import {
   formatAmount,
   amountTone,
   parseMoneyInput,
-  formatMoneyInput,
+  formatMoneyDisplay,
 } from "@/lib/format";
 
 const CATEGORY_HEADER_STYLES: Record<string, string> = {
@@ -202,7 +202,7 @@ export default function BudgetPage() {
   const handleDraftAmountBlur = useCallback((categoryId: string) => {
     setAmountDraftByCategoryId((prev) => ({
       ...prev,
-      [categoryId]: formatMoneyInput(prev[categoryId] ?? ""),
+      [categoryId]: formatMoneyDisplay(prev[categoryId] ?? ""),
     }));
   }, []);
 

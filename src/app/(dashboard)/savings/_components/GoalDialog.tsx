@@ -35,7 +35,7 @@ import {
   useCreateSavingsGoal,
   useUpdateSavingsGoal,
 } from "@/hooks/useSavingsGoals";
-import { formatMoneyInput, parseMoneyInput } from "@/lib/format";
+import { formatMoneyInput, formatMoneyDisplay, parseMoneyInput } from "@/lib/format";
 import type { SavingsGoalWithRelations } from "@/types/savings-goals";
 
 interface GoalDialogProps {
@@ -89,7 +89,7 @@ export function GoalDialog({ goal, open, onOpenChange }: GoalDialogProps) {
     if (goal) {
       form.reset({
         name: goal.name,
-        target_amount: formatMoneyInput(
+        target_amount: formatMoneyDisplay(
           String(goal.target_amount).replace(".", ",")
         ),
         currency: goal.currency,
@@ -292,15 +292,15 @@ export function GoalDialog({ goal, open, onOpenChange }: GoalDialogProps) {
                   <FormLabel>Cuenta asociada (opcional)</FormLabel>
                   <FormControl>
                     <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
+                      value={field.value || "none"}
+                      onValueChange={(val) => field.onChange(val === "none" ? "" : val)}
                       disabled={isPending}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Sin cuenta específica" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Sin cuenta específica</SelectItem>
+                        <SelectItem value="none">Sin cuenta específica</SelectItem>
                         {(accounts ?? []).map((a) => (
                           <SelectItem key={a.id} value={a.id}>
                             {a.name}

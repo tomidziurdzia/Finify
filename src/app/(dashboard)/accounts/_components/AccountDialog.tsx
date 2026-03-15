@@ -44,7 +44,7 @@ import {
   ACCOUNT_TYPE_LABELS,
 } from "@/types/accounts";
 import type { Account } from "@/types/accounts";
-import { Loader2 } from "lucide-react";
+import { Info, Loader2 } from "lucide-react";
 
 interface AccountDialogProps {
   account: Account | null;
@@ -95,6 +95,10 @@ export function AccountDialog({
   const baseManuallyEdited = useRef(false);
 
   const watchCurrency = form.watch("currency");
+  const watchAccountType = form.watch("account_type");
+  const isCryptoWallet = watchAccountType === "crypto_wallet";
+  const isCryptoExchange = watchAccountType === "crypto_exchange";
+  const isCryptoType = isCryptoWallet || isCryptoExchange;
 
   // Shared helper: fetch FX rate and update form fields
   const applyFxRate = useCallback(async (currency: string) => {
@@ -175,6 +179,21 @@ export function AccountDialog({
     }
     baseManuallyEdited.current = false;
   }, [account, open, initialBalance, form]);
+
+  // Auto-set currency when switching to crypto account types
+  useEffect(() => {
+    if (!baseCurrency || !open) return;
+    if (isCryptoWallet) {
+      form.setValue("currency", baseCurrency);
+    } else if (isCryptoExchange) {
+      const currentCurrency = form.getValues("currency");
+      const isFiat = fiatCurrencies.some((c) => c.code === currentCurrency);
+      if (!isFiat) {
+        form.setValue("currency", baseCurrency);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchAccountType, baseCurrency, open]);
 
   // Auto-fetch FX rate when dialog opens with a non-base currency
   useEffect(() => {
@@ -380,61 +399,77 @@ export function AccountDialog({
               )}
             />
 
-            <FormField
-              control={form.control}
-              name="currency"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Moneda</FormLabel>
-                  <FormControl>
-                    <Select
-                      value={field.value}
-                      onValueChange={handleCurrencyChange}
-                      disabled={isPending}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {fiatCurrencies.length > 0 && (
-                          <SelectGroup>
-                            <SelectLabel>Fiat</SelectLabel>
-                            {fiatCurrencies.map((c) => (
-                              <SelectItem key={c.code} value={c.code}>
-                                {c.symbol} {c.code} — {c.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        )}
-                        {cryptoCurrencies.length > 0 && (
-                          <SelectGroup>
-                            <SelectLabel>Crypto</SelectLabel>
-                            {cryptoCurrencies.map((c) => (
-                              <SelectItem key={c.code} value={c.code}>
-                                {c.symbol} {c.code} — {c.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        )}
-                        {etfCurrencies.length > 0 && (
-                          <SelectGroup>
-                            <SelectLabel>ETFs</SelectLabel>
-                            {etfCurrencies.map((c) => (
-                              <SelectItem key={c.code} value={c.code}>
-                                {c.symbol} {c.code} — {c.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {!isCryptoWallet && (
+              <FormField
+                control={form.control}
+                name="currency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {isCryptoExchange ? "Moneda de depósito" : "Moneda"}
+                    </FormLabel>
+                    <FormControl>
+                      <Select
+                        value={field.value}
+                        onValueChange={handleCurrencyChange}
+                        disabled={isPending}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fiatCurrencies.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel>Fiat</SelectLabel>
+                              {fiatCurrencies.map((c) => (
+                                <SelectItem key={c.code} value={c.code}>
+                                  {c.symbol} {c.code} — {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
+                          {!isCryptoExchange && cryptoCurrencies.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel>Crypto</SelectLabel>
+                              {cryptoCurrencies.map((c) => (
+                                <SelectItem key={c.code} value={c.code}>
+                                  {c.symbol} {c.code} — {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
+                          {!isCryptoExchange && etfCurrencies.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel>ETFs</SelectLabel>
+                              {etfCurrencies.map((c) => (
+                                <SelectItem key={c.code} value={c.code}>
+                                  {c.symbol} {c.code} — {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
-            {/* Saldo inicial */}
+            {isCryptoType && (
+              <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+                <Info className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  {isCryptoWallet
+                    ? "Las tenencias crypto (BTC, ETH, USDT, etc.) se agregan como inversiones dentro de la wallet."
+                    : "Moneda para depósitos/retiros fiat. Las tenencias crypto se agregan como inversiones."}
+                </span>
+              </div>
+            )}
+
+            {/* Saldo inicial — oculto para crypto_wallet */}
+            {!isCryptoWallet && (
             <div className={`grid gap-4 ${showConversion ? "grid-cols-3" : "grid-cols-1"}`}>
               <FormField
                 control={form.control}
@@ -442,7 +477,7 @@ export function AccountDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>
-                      Saldo inicial
+                      {isCryptoExchange ? "Saldo fiat inicial" : "Saldo inicial"}
                       {selectedCurrency ? ` (${selectedCurrency})` : ""}
                     </FormLabel>
                     <FormControl>
@@ -511,6 +546,7 @@ export function AccountDialog({
                 </>
               )}
             </div>
+            )}
 
             <FormField
               control={form.control}
