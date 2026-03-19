@@ -327,6 +327,7 @@ export function TransactionsTable() {
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Editar transacción"
                 onClick={() => handleEdit(tx)}
                 disabled={isClosedMonth}
                 title={isClosedMonth ? "Mes cerrado" : "Editar"}
@@ -336,6 +337,7 @@ export function TransactionsTable() {
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Eliminar transacción"
                 onClick={() => setDeletingTx(tx)}
                 disabled={isClosedMonth}
                 title={isClosedMonth ? "Mes cerrado" : "Eliminar"}

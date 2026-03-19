@@ -59,6 +59,21 @@ function monthDiff(start: MonthLite, end: MonthLite): number {
   return (end.year - start.year) * 12 + (end.month - start.month);
 }
 
+function createFxRateResolver(baseCurrency: string) {
+  const fxCache = new Map<string, number>();
+  return async (date: string, from: string): Promise<number> => {
+    if (from === baseCurrency) return 1;
+    const key = `${date}:${from}:${baseCurrency}`;
+    const cached = fxCache.get(key);
+    if (cached != null) return cached;
+
+    const result = await getOrFetchFxRate({ date, from, to: baseCurrency });
+    if ("error" in result) throw new Error(result.error);
+    fxCache.set(key, result.data);
+    return result.data;
+  };
+}
+
 async function getMonthForUser(
   userId: string,
   monthId: string,
@@ -759,25 +774,7 @@ export async function getBudgetSummaryVsActual(
     );
     const actualByCategory = new Map<string, number>();
 
-    const fxCache = new Map<string, number>();
-
-    const getRate = async (date: string, from: string): Promise<number> => {
-      if (from === baseCurrency) return 1;
-      const key = `${date}:${from}:${baseCurrency}`;
-      const cached = fxCache.get(key);
-      if (cached != null) return cached;
-
-      const result = await getOrFetchFxRate({
-        date,
-        from,
-        to: baseCurrency,
-      });
-      if ("error" in result) {
-        throw new Error(result.error);
-      }
-      fxCache.set(key, result.data);
-      return result.data;
-    };
+    const getRate = createFxRateResolver(baseCurrency);
 
     for (const row of (txRows ?? []) as any[]) {
       const categoryId = row.category_id as string | null;
@@ -922,25 +919,7 @@ export async function getBudgetSummaryVsActualForRange(
     );
     const actualByCategory = new Map<string, number>();
 
-    const fxCache = new Map<string, number>();
-
-    const getRate = async (date: string, from: string): Promise<number> => {
-      if (from === baseCurrency) return 1;
-      const key = `${date}:${from}:${baseCurrency}`;
-      const cached = fxCache.get(key);
-      if (cached != null) return cached;
-
-      const result = await getOrFetchFxRate({
-        date,
-        from,
-        to: baseCurrency,
-      });
-      if ("error" in result) {
-        throw new Error(result.error);
-      }
-      fxCache.set(key, result.data);
-      return result.data;
-    };
+    const getRate = createFxRateResolver(baseCurrency);
 
     for (const row of (txRows ?? []) as any[]) {
       const categoryId = row.category_id as string | null;

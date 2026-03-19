@@ -150,8 +150,10 @@ export async function getForecast(
         }
 
         const numMonths = recentMonths.length;
-        monthlyIncome = totalIncome / numMonths;
-        monthlyExpenses = totalExpenses / numMonths;
+        if (numMonths > 0) {
+          monthlyIncome = totalIncome / numMonths;
+          monthlyExpenses = totalExpenses / numMonths;
+        }
       }
     }
 
