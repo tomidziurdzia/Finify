@@ -201,12 +201,24 @@ export async function recalculateGoalProgress(
       }
     }
 
-    // Update the goal's current_amount
+    // Fetch target_amount to determine completion in a single update
+    const { data: goalRow } = await supabase
+      .from("savings_goals")
+      .select("target_amount")
+      .eq("id", goalId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (!goalRow) return { error: "Meta no encontrada" };
+
+    const isCompleted = total >= Number(goalRow.target_amount);
+
+    // Single atomic update with both current_amount and is_completed
     const { data: updated, error: updateError } = await supabase
       .from("savings_goals")
       .update({
         current_amount: total,
-        is_completed: false, // Will be determined below
+        is_completed: isCompleted,
         updated_at: new Date().toISOString(),
       })
       .eq("id", goalId)
@@ -222,19 +234,7 @@ export async function recalculateGoalProgress(
 
     if (updateError) return { error: updateError.message };
 
-    const goal = mapGoal(updated);
-
-    // Mark as completed if reached target
-    if (goal.current_amount >= goal.target_amount) {
-      await supabase
-        .from("savings_goals")
-        .update({ is_completed: true })
-        .eq("id", goalId)
-        .eq("user_id", user.id);
-      goal.is_completed = true;
-    }
-
-    return { data: goal };
+    return { data: mapGoal(updated) };
   } catch (e) {
     console.error("recalculateGoalProgress:", e);
     return { error: "Error al recalcular el progreso" };

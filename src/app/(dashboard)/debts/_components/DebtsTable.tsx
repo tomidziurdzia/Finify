@@ -149,10 +149,10 @@ export function DebtsTable() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => handleEdit(debt)}>
+                      <Button variant="ghost" size="icon" aria-label="Editar deuda" onClick={() => handleEdit(debt)}>
                         <Pencil className="size-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeletingDebt(debt)}>
+                      <Button variant="ghost" size="icon" aria-label="Eliminar deuda" onClick={() => setDeletingDebt(debt)}>
                         <Trash2 className="size-4" />
                       </Button>
                     </div>

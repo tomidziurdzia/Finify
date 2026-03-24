@@ -149,6 +149,7 @@ export function AccountsTable() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        aria-label="Editar cuenta"
                         onClick={() => handleEdit(account)}
                       >
                         <Pencil className="size-4" />
@@ -156,6 +157,7 @@ export function AccountsTable() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        aria-label="Eliminar cuenta"
                         onClick={() => setDeletingAccount(account)}
                       >
                         <Trash2 className="size-4" />

@@ -413,6 +413,7 @@ export function InvestmentsTable() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              aria-label="Editar inversión"
                               onClick={() => handleEdit(singleInv)}
                             >
                               <Pencil className="size-4" />
@@ -420,6 +421,7 @@ export function InvestmentsTable() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              aria-label="Eliminar inversión"
                               onClick={() => setDeletingInvestment(singleInv)}
                             >
                               <Trash2 className="size-4" />

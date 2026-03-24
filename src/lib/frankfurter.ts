@@ -15,13 +15,20 @@ export async function fetchExchangeRate(
 
   try {
     const endpoint = date ?? "latest";
-    const res = await fetch(
-      `https://api.frankfurter.dev/v1/${endpoint}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`
-    );
-    if (!res.ok) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(
+        `https://api.frankfurter.dev/v1/${endpoint}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`,
+        { signal: controller.signal }
+      );
+      if (!res.ok) return null;
 
-    const data: { rates: Record<string, number> } = await res.json();
-    return data.rates[to] ?? null;
+      const data: { rates: Record<string, number> } = await res.json();
+      return data.rates[to] ?? null;
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch {
     return null;
   }

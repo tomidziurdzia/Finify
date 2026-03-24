@@ -27,6 +27,7 @@ export interface TransactionRule {
   priority: number;
   is_active: boolean;
   created_at: string;
+  updated_at: string;
 }
 
 export interface TransactionRuleWithCategory extends TransactionRule {

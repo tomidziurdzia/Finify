@@ -55,5 +55,6 @@ export function numberToInputString(value: number): string {
  */
 export function parseNumberInput(value: string): number {
   const cleaned = value.replace(/\./g, "").replace(",", ".");
-  return parseFloat(cleaned);
+  const result = parseFloat(cleaned);
+  return isFinite(result) ? result : 0;
 }

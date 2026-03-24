@@ -135,7 +135,7 @@ export async function createInvestment(
 
     // Auto-descuento para brokers (no para crypto exchanges/wallets, ni inversiones existentes)
     if (account.account_type === "investment_broker" && !parsed.data.skip_deduction) {
-      await autoDeductFromAccount(
+      const deductionError = await autoDeductFromAccount(
         supabase,
         userId,
         parsed.data.account_id,
@@ -145,6 +145,9 @@ export async function createInvestment(
         parsed.data.purchase_date,
         parsed.data.asset_name
       );
+      if (deductionError) {
+        console.warn("Auto-deduction failed:", deductionError);
+      }
     }
 
     return {
@@ -170,7 +173,7 @@ async function autoDeductFromAccount(
   investmentCurrency: string,
   date: string,
   assetName: string
-) {
+): Promise<string | null> {
   try {
     // Resolver month_id para la fecha
     const parsedDate = new Date(`${date}T00:00:00`);
@@ -185,7 +188,7 @@ async function autoDeductFromAccount(
       .eq("month", month)
       .maybeSingle();
 
-    if (!monthRow) return; // Si no hay mes, no descontar
+    if (!monthRow) return null; // No month exists yet, skip deduction
 
     // El monto se registra en la moneda de la cuenta
     const amount = -Math.abs(totalCost);
@@ -193,7 +196,7 @@ async function autoDeductFromAccount(
     const baseAmount = amount; // Simplificado: asumimos misma moneda
 
     // Crear transacción tipo correction
-    const { data: tx } = await supabase
+    const { data: tx, error: txError } = await supabase
       .from("transactions")
       .insert({
         user_id: userId,
@@ -207,9 +210,10 @@ async function autoDeductFromAccount(
       .select()
       .single();
 
-    if (!tx) return;
+    if (txError) return txError.message;
+    if (!tx) return "No se pudo crear la transacción de descuento";
 
-    await supabase.from("transaction_amounts").insert({
+    const { error: amountError } = await supabase.from("transaction_amounts").insert({
       transaction_id: tx.id,
       account_id: accountId,
       amount,
@@ -217,8 +221,17 @@ async function autoDeductFromAccount(
       exchange_rate: exchangeRate,
       base_amount: baseAmount,
     });
+
+    if (amountError) {
+      // Cleanup orphaned transaction
+      await supabase.from("transactions").delete().eq("id", tx.id);
+      return amountError.message;
+    }
+
+    return null;
   } catch (e) {
     console.error("autoDeductFromAccount:", e);
+    return e instanceof Error ? e.message : "Error desconocido en auto-descuento";
   }
 }
 

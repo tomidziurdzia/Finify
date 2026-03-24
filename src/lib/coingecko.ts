@@ -36,7 +36,16 @@ export async function fetchCryptoPrices(
     url.searchParams.set("x_cg_demo_api_key", apiKey);
   }
 
-  const res = await fetch(url.toString());
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { signal: controller.signal });
+  } catch {
+    return {};
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     return {};
   }
