@@ -9,6 +9,8 @@ import {
 import { getOrFetchFxRate } from "@/actions/fx";
 import type {
   Transaction,
+  TransactionFeedFilters,
+  TransactionFeedPage,
   TransactionWithRelations,
   TransactionAmountWithRelations,
 } from "@/types/transactions";
@@ -22,6 +24,104 @@ type TransactionAmountInput = {
   exchange_rate: number;
   base_amount: number;
 };
+
+type TransactionFeedInput = {
+  monthId: string;
+  limit?: number;
+  offset?: number;
+} & TransactionFeedFilters;
+
+function mapTransactionRows(
+  rows: Array<Record<string, unknown>>,
+): TransactionWithRelations[] {
+  return rows.map((row) => ({
+    id: String(row.id),
+    user_id: String(row.user_id),
+    month_id: (row.month_id as string | null) ?? null,
+    category_id: (row.category_id as string | null) ?? null,
+    transaction_type: row.transaction_type as TransactionWithRelations["transaction_type"],
+    date: String(row.date),
+    description: String(row.description ?? ""),
+    notes: (row.notes as string | null) ?? null,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    category_name: (row.category_name as string | null) ?? null,
+    category_type: (row.category_type as TransactionWithRelations["category_type"]) ?? null,
+    amounts: Array.isArray(row.amounts)
+      ? (row.amounts as Array<Record<string, unknown>>).map((line) => ({
+          id: String(line.id),
+          transaction_id: String(line.transaction_id),
+          account_id: String(line.account_id),
+          amount: Number(line.amount ?? 0),
+          original_currency: String(line.original_currency ?? ""),
+          exchange_rate: Number(line.exchange_rate ?? 1),
+          base_amount: Number(line.base_amount ?? 0),
+          created_at: String(line.created_at),
+          account_name: String(line.account_name ?? ""),
+          account_currency_symbol: String(line.account_currency_symbol ?? ""),
+          current_base_amount:
+            line.current_base_amount != null
+              ? Number(line.current_base_amount)
+              : undefined,
+        }))
+      : [],
+  }));
+}
+
+async function buildTransferLines({
+  date,
+  sourceAccount,
+  destAccount,
+  sourceAmount,
+  destinationAmount,
+  exchangeRate,
+}: {
+  date: string;
+  sourceAccount: { id: string; currency: string };
+  destAccount: { id: string; currency: string };
+  sourceAmount: number;
+  destinationAmount: number;
+  exchangeRate: number;
+}): Promise<ActionResult<TransactionAmountInput[]>> {
+  const baseCurrencyResult = await getBaseCurrency();
+  if ("error" in baseCurrencyResult) return baseCurrencyResult;
+
+  const baseCurrency = baseCurrencyResult.data;
+  const sourceAbsolute = Math.abs(sourceAmount);
+  const destinationAbsolute = Math.abs(destinationAmount);
+
+  let transferBaseAmount = 0;
+  if (sourceAccount.currency === baseCurrency) {
+    transferBaseAmount = sourceAbsolute;
+  } else if (destAccount.currency === baseCurrency) {
+    transferBaseAmount = destinationAbsolute;
+  } else {
+    const fxResult = await getOrFetchFxRate({
+      date,
+      from: sourceAccount.currency,
+      to: baseCurrency,
+    });
+    if ("error" in fxResult) return fxResult;
+    transferBaseAmount = sourceAbsolute * fxResult.data;
+  }
+
+  return {
+    data: [
+      {
+        account_id: sourceAccount.id,
+        amount: -sourceAbsolute,
+        exchange_rate: exchangeRate,
+        base_amount: -Math.abs(transferBaseAmount),
+      },
+      {
+        account_id: destAccount.id,
+        amount: destinationAbsolute,
+        exchange_rate: exchangeRate,
+        base_amount: Math.abs(transferBaseAmount),
+      },
+    ],
+  };
+}
 
 function normalizeSignedAmount(
   transactionType: "income" | "expense" | "correction",
@@ -80,29 +180,24 @@ export async function getUsageCounts(): Promise<
     } = await supabase.auth.getUser();
     if (!user) return { error: "No autenticado" };
 
-    // Count transactions per account via transaction_amounts
-    const { data: accountRows } = await supabase
-      .from("transaction_amounts")
-      .select("account_id, transactions!inner(user_id)")
-      .eq("transactions.user_id", user.id);
-
     const accountCounts: Record<string, number> = {};
-    for (const row of accountRows ?? []) {
-      accountCounts[row.account_id] = (accountCounts[row.account_id] ?? 0) + 1;
-    }
-
-    // Count transactions per category
-    const { data: categoryRows } = await supabase
-      .from("transactions")
-      .select("category_id")
-      .eq("user_id", user.id)
-      .not("category_id", "is", null)
-      .is("deleted_at", null);
-
     const categoryCounts: Record<string, number> = {};
-    for (const row of categoryRows ?? []) {
-      if (row.category_id) {
-        categoryCounts[row.category_id] = (categoryCounts[row.category_id] ?? 0) + 1;
+
+    const { data, error } = await supabase.rpc("usage_counts");
+    if (error) return { error: error.message };
+
+    for (const row of (data ?? []) as Array<{
+      entity_type: string;
+      entity_id: string | null;
+      usage_count: number | string;
+    }>) {
+      if (!row.entity_id) continue;
+      const count = Number(row.usage_count ?? 0);
+      if (row.entity_type === "account") {
+        accountCounts[row.entity_id] = count;
+      }
+      if (row.entity_type === "category") {
+        categoryCounts[row.entity_id] = count;
       }
     }
 
@@ -222,6 +317,46 @@ export async function getTransactions(
     return { data: mapped };
   } catch (e) {
     console.error("getTransactions:", e);
+    return { error: "Error al obtener las transacciones" };
+  }
+}
+
+export async function getTransactionsPage(
+  input: TransactionFeedInput,
+): Promise<ActionResult<TransactionFeedPage>> {
+  try {
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+    const offset = Math.max(input.offset ?? 0, 0);
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "No autenticado" };
+
+    const { data, error } = await supabase.rpc("transactions_feed", {
+      p_month_id: input.monthId,
+      p_limit: limit,
+      p_offset: offset,
+      p_search: input.search?.trim() || null,
+      p_transaction_type: input.transaction_type ?? null,
+      p_account_id: input.account_id ?? null,
+      p_category_id: input.category_id ?? null,
+      p_category_type: input.category_type ?? null,
+    });
+
+    if (error) return { error: error.message };
+
+    const items = mapTransactionRows((data ?? []) as Array<Record<string, unknown>>);
+
+    return {
+      data: {
+        items,
+        nextOffset: items.length === limit ? offset + items.length : null,
+      },
+    };
+  } catch (e) {
+    console.error("getTransactionsPage:", e);
     return { error: "Error al obtener las transacciones" };
   }
 }
@@ -528,20 +663,17 @@ export async function createTransfer(
 
     if (txError) return { error: txError.message };
 
-    const transferLines: TransactionAmountInput[] = [
-      {
-        account_id: sourceAccount.id,
-        amount: -Math.abs(parsed.data.amount),
-        exchange_rate: parsed.data.exchange_rate,
-        base_amount: -Math.abs(parsed.data.base_amount),
-      },
-      {
-        account_id: destAccount.id,
-        amount: Math.abs(parsed.data.amount),
-        exchange_rate: parsed.data.exchange_rate,
-        base_amount: Math.abs(parsed.data.base_amount),
-      },
-    ];
+    const transferLinesResult = await buildTransferLines({
+      date: parsed.data.date,
+      sourceAccount,
+      destAccount,
+      sourceAmount: parsed.data.amount,
+      destinationAmount: parsed.data.base_amount,
+      exchangeRate: parsed.data.exchange_rate,
+    });
+    if ("error" in transferLinesResult) return transferLinesResult;
+
+    const transferLines = transferLinesResult.data;
 
     const rows = transferLines.map((line) => ({
       transaction_id: transaction.id,
@@ -674,7 +806,7 @@ export async function updateTransaction(
 
     const { data: existing } = await supabase
       .from("transactions")
-      .select("id, transaction_type, month_id")
+      .select("id, transaction_type, month_id, date")
       .eq("id", id)
       .eq("user_id", user.id)
       .single();
@@ -731,7 +863,61 @@ export async function updateTransaction(
     if (txError) return { error: txError.message };
 
     let amountLines = amounts ?? null;
-    if (!amountLines) {
+
+    if (existing.transaction_type === "transfer") {
+      const { data: currentLines } = await supabase
+        .from("transaction_amounts")
+        .select("account_id, amount, exchange_rate")
+        .eq("transaction_id", id);
+
+      const sourceLine = amountLines?.find((line) => line.amount < 0) ??
+        currentLines?.find((line) => line.amount < 0);
+      const destinationLine = amountLines?.find((line) => line.amount > 0) ??
+        currentLines?.find((line) => line.amount > 0);
+
+      const sourceAccountId = source_account_id ?? sourceLine?.account_id;
+      const destinationAccountId =
+        destination_account_id ?? destinationLine?.account_id;
+
+      if (!sourceAccountId || !destinationAccountId) {
+        return { error: "Cuenta origen o destino no encontrada" };
+      }
+
+      const { data: transferAccounts } = await supabase
+        .from("accounts")
+        .select("id, currency")
+        .in("id", [sourceAccountId, destinationAccountId])
+        .eq("user_id", user.id)
+        .returns<{ id: string; currency: string }[]>();
+
+      if (!transferAccounts || transferAccounts.length !== 2) {
+        return { error: "Cuenta no encontrada" };
+      }
+
+      const sourceAccount = transferAccounts.find(
+        (account) => account.id === sourceAccountId,
+      );
+      const destAccount = transferAccounts.find(
+        (account) => account.id === destinationAccountId,
+      );
+
+      if (!sourceAccount || !destAccount) {
+        return { error: "Cuenta no encontrada" };
+      }
+
+      const transferLinesResult = await buildTransferLines({
+        date: updates.date ?? existing.date,
+        sourceAccount,
+        destAccount,
+        sourceAmount: amount ?? Math.abs(sourceLine?.amount ?? 0),
+        destinationAmount:
+          base_amount ?? Math.abs(destinationLine?.amount ?? 0),
+        exchangeRate:
+          exchange_rate ?? sourceLine?.exchange_rate ?? destinationLine?.exchange_rate ?? 1,
+      });
+      if ("error" in transferLinesResult) return transferLinesResult;
+      amountLines = transferLinesResult.data;
+    } else if (!amountLines) {
       const { data: currentLines } = await supabase
         .from("transaction_amounts")
         .select("account_id, amount")

@@ -1,24 +1,17 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useReactTable,
   getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
   flexRender,
   type ColumnDef,
-  type ColumnFiltersState,
-  type PaginationState,
-  type SortingState,
 } from "@tanstack/react-table";
 import {
   Plus,
   Pencil,
   Trash2,
   ArrowLeftRight,
-  ArrowUpDown,
   Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -56,9 +49,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  useBaseCurrency,
+  useInfiniteTransactions,
   useTransactions,
   useDeleteTransaction,
-  useBaseCurrency,
 } from "@/hooks/useTransactions";
 import { useInvestments } from "@/hooks/useInvestments";
 import {
@@ -68,7 +62,8 @@ import {
   usePreviewNextMonth,
   useOpeningBalances,
 } from "@/hooks/useMonths";
-import { useCurrencies } from "@/hooks/useAccounts";
+import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
+import { useBudgetCategories } from "@/hooks/useBudget";
 import {
   TRANSACTION_TYPE_LABELS,
   type TransactionWithRelations,
@@ -77,9 +72,17 @@ import { BUDGET_CATEGORY_LABELS } from "@/types/budget";
 import { TransactionDialog } from "./TransactionDialog";
 import { TransferDialog } from "./TransferDialog";
 import { parseISO, format } from "date-fns";
-import type { NextMonthPreview } from "@/types/months";
+import type { Month, NextMonthPreview } from "@/types/months";
 import { MONTH_NAMES, formatAmount, amountTone } from "@/lib/format";
 import { useMonthSummary, getPrimaryLine } from "@/hooks/useMonthSummary";
+
+type TableTransaction = TransactionWithRelations & {
+  primaryLine: NonNullable<ReturnType<typeof getPrimaryLine>> | null;
+  primaryAccountName: string;
+  primaryAmount: number;
+  primaryBaseAmount: number;
+  searchText: string;
+};
 
 const TYPE_BADGE_STYLES: Record<string, string> = {
   income: "bg-green-100 text-green-800 hover:bg-green-100",
@@ -97,15 +100,12 @@ const AMOUNT_COLOR: Record<string, string> = {
 
 export function TransactionsTable() {
   const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: "date", desc: true },
-  ]);
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 10,
-  });
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [transactionTypeFilter, setTransactionTypeFilter] = useState("all");
+  const [accountIdFilter, setAccountIdFilter] = useState("all");
+  const [categoryIdFilter, setCategoryIdFilter] = useState("all");
+  const [categoryTypeFilter, setCategoryTypeFilter] = useState("all");
 
   const [txDialogOpen, setTxDialogOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<TransactionWithRelations | null>(
@@ -120,12 +120,21 @@ export function TransactionsTable() {
   const [createMonthDialogOpen, setCreateMonthDialogOpen] = useState(false);
   const [nextMonthPreview, setNextMonthPreview] =
     useState<NextMonthPreview | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   const { data: months } = useMonths();
   const ensureCurrentMonth = useEnsureCurrentMonth();
   const createNextMonth = useCreateNextMonth();
   const previewNextMonth = usePreviewNextMonth();
   const sortedMonths = months ?? [];
+  const monthOptions = useMemo(
+    () =>
+      sortedMonths.map((month, idx) => ({
+        id: month.id,
+        label: `${MONTH_NAMES[month.month - 1]} ${month.year}${idx > 0 ? " 🔒" : ""}`,
+      })),
+    [sortedMonths],
+  );
 
   useEffect(() => {
     if (!months || months.length > 0 || ensureCurrentMonth.isPending) return;
@@ -143,6 +152,14 @@ export function TransactionsTable() {
     }
   }, [selectedMonthId, sortedMonths]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSearchTerm(searchDraft.trim());
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchDraft]);
+
   const selectedMonth =
     sortedMonths.find((month) => month.id === selectedMonthId) ?? null;
 
@@ -153,15 +170,36 @@ export function TransactionsTable() {
 
   const {
     data: transactions,
-    isLoading,
+    isLoading: summaryLoading,
+  } = useTransactions(selectedMonthId);
+  const {
+    data: transactionPages,
+    isLoading: isFeedLoading,
     isError,
     error,
     refetch,
-  } = useTransactions(selectedMonthId);
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteTransactions(selectedMonthId, {
+    search: searchTerm || undefined,
+    transaction_type:
+      transactionTypeFilter === "all"
+        ? null
+        : (transactionTypeFilter as TransactionWithRelations["transaction_type"]),
+    account_id: accountIdFilter === "all" ? null : accountIdFilter,
+    category_id: categoryIdFilter === "all" ? null : categoryIdFilter,
+    category_type:
+      categoryTypeFilter === "all"
+        ? null
+        : (categoryTypeFilter as NonNullable<TransactionWithRelations["category_type"]>),
+  });
   const { data: openingBalances } = useOpeningBalances(selectedMonthId);
   const deleteMutation = useDeleteTransaction();
   const { data: baseCurrency } = useBaseCurrency();
   const { data: currencies } = useCurrencies();
+  const { data: accounts } = useAccounts();
+  const { data: categories } = useBudgetCategories();
 
   const baseCurrencySymbol = useMemo(() => {
     if (!baseCurrency) return "";
@@ -171,7 +209,54 @@ export function TransactionsTable() {
     return found?.symbol ?? baseCurrency;
   }, [baseCurrency, currencies]);
 
-  const tableTransactions = useMemo(() => transactions ?? [], [transactions]);
+  const feedTransactions = useMemo(
+    () => transactionPages?.pages.flatMap((page) => page.items) ?? [],
+    [transactionPages],
+  );
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, feedTransactions.length]);
+
+  const tableTransactions = useMemo<TableTransaction[]>(() => {
+    return feedTransactions.map((transaction) => {
+      const primaryLine = getPrimaryLine(transaction);
+      const primaryAccountName = primaryLine?.account_name ?? "";
+      const primaryAmount = Math.abs(primaryLine?.amount ?? 0);
+      const primaryBaseAmount = Math.abs(
+        primaryLine?.current_base_amount ?? primaryLine?.base_amount ?? 0,
+      );
+
+      return {
+        ...transaction,
+        primaryLine,
+        primaryAccountName,
+        primaryAmount,
+        primaryBaseAmount,
+        searchText: [
+          transaction.description,
+          transaction.category_name ?? "",
+          primaryAccountName,
+          TRANSACTION_TYPE_LABELS[transaction.transaction_type],
+        ]
+          .join(" ")
+          .toLowerCase(),
+      };
+    });
+  }, [feedTransactions]);
 
   const { monthSummary, accountMonthlyBalances } = useMonthSummary(
     transactions,
@@ -190,41 +275,27 @@ export function TransactionsTable() {
     return map;
   }, [allInvestments]);
 
-  const accountFilterOptions = useMemo(() => {
-    const values = new Set<string>();
-    for (const tx of tableTransactions) {
-      const accountName =
-        (tx.transaction_type === "transfer"
-          ? tx.amounts.find((line) => line.amount < 0)?.account_name
-          : tx.amounts[0]?.account_name) ?? null;
-      if (accountName) values.add(accountName);
-    }
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [tableTransactions]);
+  const accountFilterOptions = useMemo(
+    () =>
+      (accounts ?? [])
+        .filter((account) => account.is_active)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [accounts],
+  );
 
-  const categoryFilterOptions = useMemo(() => {
-    const values = new Set<string>();
-    for (const tx of tableTransactions) {
-      if (tx.category_name) values.add(tx.category_name);
-    }
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [tableTransactions]);
+  const categoryFilterOptions = useMemo(
+    () =>
+      (categories ?? [])
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [categories],
+  );
 
-  const columns = useMemo<ColumnDef<TransactionWithRelations>[]>(
+  const columns = useMemo<ColumnDef<TableTransaction>[]>(
     () => [
       {
         accessorKey: "date",
-        header: ({ column }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-3"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Fecha
-            <ArrowUpDown className="ml-1 size-3" />
-          </Button>
-        ),
+        header: "Fecha",
         cell: ({ row }) => format(parseISO(row.original.date), "dd/MM/yyyy"),
       },
       {
@@ -236,7 +307,6 @@ export function TransactionsTable() {
         accessorKey: "transaction_type",
         header: "Tipo",
         enableSorting: false,
-        filterFn: "equalsString",
         cell: ({ row }) => {
           const type = row.original.transaction_type;
           return (
@@ -250,12 +320,11 @@ export function TransactionsTable() {
         },
       },
       {
-        accessorFn: (row) => getPrimaryLine(row)?.account_name ?? "—",
+        accessorFn: (row) => row.primaryAccountName || "—",
         id: "account_name",
         header: "Cuenta",
         enableSorting: false,
-        filterFn: "equalsString",
-        cell: ({ row }) => getPrimaryLine(row.original)?.account_name ?? "—",
+        cell: ({ row }) => row.original.primaryAccountName || "—",
       },
       {
         accessorKey: "category_name",
@@ -269,25 +338,14 @@ export function TransactionsTable() {
         header: "Tipo de categoría",
         enableSorting: false,
         enableHiding: true,
-        filterFn: "equalsString",
       },
       {
-        accessorFn: (row) => Math.abs(getPrimaryLine(row)?.amount ?? 0),
+        accessorFn: (row) => row.primaryAmount,
         id: "amount",
-        header: ({ column }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-3"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Monto
-            <ArrowUpDown className="ml-1 size-3" />
-          </Button>
-        ),
+        header: "Monto",
         cell: ({ row }) => {
           const tx = row.original;
-          const line = getPrimaryLine(tx);
+          const line = tx.primaryLine;
           const color = AMOUNT_COLOR[tx.transaction_type] ?? "";
           return (
             <span className={`font-medium ${color}`}>
@@ -298,22 +356,12 @@ export function TransactionsTable() {
         },
       },
       {
-        accessorFn: (row) =>
-          Math.abs(
-            getPrimaryLine(row)?.current_base_amount ??
-              getPrimaryLine(row)?.base_amount ??
-              0,
-          ),
+        accessorFn: (row) => row.primaryBaseAmount,
         id: "base_amount",
         header: "Monto Base",
-        enableSorting: true,
         cell: ({ row }) =>
           `${baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}${formatAmount(
-            Math.abs(
-              getPrimaryLine(row.original)?.current_base_amount ??
-                getPrimaryLine(row.original)?.base_amount ??
-                0,
-            ),
+            row.original.primaryBaseAmount,
           )}`,
       },
       {
@@ -349,55 +397,27 @@ export function TransactionsTable() {
         },
       },
     ],
-    [baseCurrencySymbol],
+    [baseCurrencySymbol, isClosedMonth],
   );
 
   const table = useReactTable({
     data: tableTransactions,
     columns,
-    state: { sorting, globalFilter, columnFilters, pagination },
     initialState: { columnVisibility: { category_type: false } },
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-    onColumnFiltersChange: setColumnFilters,
-    onPaginationChange: setPagination,
-    globalFilterFn: (row, _columnId, filterValue) => {
-      const query = String(filterValue ?? "")
-        .trim()
-        .toLowerCase();
-      if (!query) return true;
-      const tx = row.original;
-      const accountName =
-        (tx.transaction_type === "transfer"
-          ? tx.amounts.find((line) => line.amount < 0)?.account_name
-          : tx.amounts[0]?.account_name) ?? "";
-      const haystack = [
-        tx.description,
-        tx.category_name ?? "",
-        accountName,
-        TRANSACTION_TYPE_LABELS[tx.transaction_type],
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    },
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
   });
 
-  const handleCreateTx = () => {
+  const handleCreateTx = useCallback(() => {
     setEditingTx(null);
     setTxDialogOpen(true);
-  };
+  }, []);
 
-  const handleCreateTransfer = () => {
+  const handleCreateTransfer = useCallback(() => {
     setEditingTransfer(null);
     setTransferDialogOpen(true);
-  };
+  }, []);
 
-  const handleEdit = (tx: TransactionWithRelations) => {
+  const handleEdit = useCallback((tx: TransactionWithRelations) => {
     if (tx.transaction_type === "transfer") {
       setEditingTransfer(tx);
       setTransferDialogOpen(true);
@@ -405,7 +425,7 @@ export function TransactionsTable() {
     }
     setEditingTx(tx);
     setTxDialogOpen(true);
-  };
+  }, []);
 
   const handleDelete = async () => {
     if (!deletingTx) return;
@@ -438,7 +458,7 @@ export function TransactionsTable() {
     }
   };
 
-  if (isLoading && !selectedMonthId) {
+  if ((isFeedLoading || summaryLoading) && !selectedMonthId) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-10 w-72" />
@@ -468,54 +488,17 @@ export function TransactionsTable() {
 
   return (
     <>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
-          <Select
-            value={selectedMonthId ?? ""}
-            onValueChange={setSelectedMonthId}
-            disabled={ensureCurrentMonth.isPending}
-          >
-            <SelectTrigger className="w-52">
-              <SelectValue placeholder="Seleccionar mes" />
-            </SelectTrigger>
-            <SelectContent>
-              {sortedMonths.map((month, idx) => (
-                <SelectItem key={month.id} value={month.id}>
-                  {MONTH_NAMES[month.month - 1]} {month.year}
-                  {idx > 0 ? " 🔒" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCreateNextMonth}
-            disabled={createNextMonth.isPending || previewNextMonth.isPending}
-          >
-            {previewNextMonth.isPending ? "Calculando..." : "Nuevo mes"}
-          </Button>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={handleCreateTransfer}
-            size="sm"
-            variant="outline"
-            disabled={!selectedMonthId || isClosedMonth}
-          >
-            <ArrowLeftRight className="mr-1 size-4" />
-            Transferencia
-          </Button>
-          <Button
-            onClick={handleCreateTx}
-            size="sm"
-            disabled={!selectedMonthId || isClosedMonth}
-          >
-            <Plus className="mr-1 size-4" />
-            Nueva transacción
-          </Button>
-        </div>
-      </div>
+      <TransactionsToolbar
+        selectedMonthId={selectedMonthId}
+        monthOptions={monthOptions}
+        isClosedMonth={isClosedMonth}
+        isBusy={ensureCurrentMonth.isPending}
+        isCreatingMonth={createNextMonth.isPending || previewNextMonth.isPending}
+        onMonthChange={setSelectedMonthId}
+        onCreateNextMonth={handleCreateNextMonth}
+        onCreateTransfer={handleCreateTransfer}
+        onCreateTransaction={handleCreateTx}
+      />
 
       {selectedMonth && (
         <p className="text-lg font-semibold">
@@ -534,181 +517,27 @@ export function TransactionsTable() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Saldo apertura</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p
-              className={`text-2xl font-semibold ${amountTone(monthSummary.openingBase)}`}
-            >
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(monthSummary.openingBase)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Ingresos</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-semibold text-green-600">
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(Math.abs(monthSummary.income))}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Gastos Esenciales</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-semibold text-red-600">
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(Math.abs(monthSummary.essentialExpenses))}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Gastos Discrecionales</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-semibold text-orange-600">
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(Math.abs(monthSummary.discretionaryExpenses))}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Pago de Deudas</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-semibold text-rose-600">
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(Math.abs(monthSummary.debtPayments))}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Ahorros</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-semibold text-cyan-600">
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(Math.abs(monthSummary.savings))}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Inversiones</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p className="text-2xl font-semibold text-indigo-600">
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(Math.abs(monthSummary.investments))}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHeader className="px-4 pt-4 pb-2">
-            <CardDescription>Saldo cierre</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <p
-              className={`text-2xl font-semibold ${amountTone(monthSummary.closingBase)}`}
-            >
-              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
-              {formatAmount(monthSummary.closingBase)}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <TransactionsSummaryCards
+        monthSummary={monthSummary}
+        baseCurrencySymbol={baseCurrencySymbol}
+      />
 
-      {selectedMonth && (
-        <div className="rounded-md border p-3 sm:p-4">
-          <p className="text-base font-semibold">
-            Saldos por cuenta - {MONTH_NAMES[selectedMonth.month - 1]}{" "}
-            {selectedMonth.year}
-          </p>
-          <p className="text-muted-foreground mb-3 text-xs">
-            Inicio y cierre del mes seleccionado.
-          </p>
-          {accountMonthlyBalances.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {accountMonthlyBalances.map((account) => {
-                const invTotal = investmentByAccount.get(account.accountId) ?? 0;
-                return (
-                  <div
-                    key={account.name}
-                    className="bg-muted/20 space-y-2 rounded-md border px-3 py-2.5"
-                  >
-                    <p className="text-foreground truncate text-sm font-semibold">
-                      {account.name} ({account.currencyCode})
-                    </p>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        Inicio del mes
-                      </span>
-                      <span
-                        className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.opening)}`}
-                      >
-                        {account.symbol} {formatAmount(account.opening)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Final del mes</span>
-                      <span
-                        className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.closing)}`}
-                      >
-                        {account.symbol} {formatAmount(account.closing)}
-                      </span>
-                    </div>
-                    {invTotal > 0 && (
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">Inversiones</span>
-                        <span className="whitespace-nowrap text-sm font-semibold text-indigo-600">
-                          {account.symbol} {formatAmount(invTotal)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              No hay saldos iniciales cargados para este mes.
-            </p>
-          )}
-        </div>
-      )}
+      <TransactionsAccountBalances
+        selectedMonth={selectedMonth}
+        accountMonthlyBalances={accountMonthlyBalances}
+        investmentByAccount={investmentByAccount}
+      />
 
       <div className="flex flex-wrap items-start justify-start gap-2">
         <Input
           className="w-full md:w-80"
           placeholder="Buscar descripción/cuenta/categoría..."
-          value={globalFilter}
-          onChange={(event) => {
-            setGlobalFilter(event.target.value);
-            table.setPageIndex(0);
-          }}
+          value={searchDraft}
+          onChange={(event) => setSearchDraft(event.target.value)}
         />
         <Select
-          value={
-            (table.getColumn("transaction_type")?.getFilterValue() as string) ??
-            "all"
-          }
-          onValueChange={(value) => {
-            table
-              .getColumn("transaction_type")
-              ?.setFilterValue(value === "all" ? undefined : value);
-            table.setPageIndex(0);
-          }}
+          value={transactionTypeFilter}
+          onValueChange={setTransactionTypeFilter}
         >
           <SelectTrigger className="w-full md:w-52">
             <SelectValue placeholder="Tipo" />
@@ -722,64 +551,40 @@ export function TransactionsTable() {
           </SelectContent>
         </Select>
         <Select
-          value={
-            (table.getColumn("account_name")?.getFilterValue() as string) ??
-            "all"
-          }
-          onValueChange={(value) => {
-            table
-              .getColumn("account_name")
-              ?.setFilterValue(value === "all" ? undefined : value);
-            table.setPageIndex(0);
-          }}
+          value={accountIdFilter}
+          onValueChange={setAccountIdFilter}
         >
           <SelectTrigger className="w-full md:w-52">
             <SelectValue placeholder="Cuenta" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas las cuentas</SelectItem>
-            {accountFilterOptions.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
+            {accountFilterOptions.map((account) => (
+              <SelectItem key={account.id} value={account.id}>
+                {account.name}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select
-          value={
-            (table.getColumn("category_name")?.getFilterValue() as string) ??
-            "all"
-          }
-          onValueChange={(value) => {
-            table
-              .getColumn("category_name")
-              ?.setFilterValue(value === "all" ? undefined : value);
-            table.setPageIndex(0);
-          }}
+          value={categoryIdFilter}
+          onValueChange={setCategoryIdFilter}
         >
           <SelectTrigger className="w-full md:w-52">
             <SelectValue placeholder="Categoría" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas las categorías</SelectItem>
-            {categoryFilterOptions.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
+            {categoryFilterOptions.map((category) => (
+              <SelectItem key={category.id} value={category.id}>
+                {category.name}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select
-          value={
-            (table.getColumn("category_type")?.getFilterValue() as string) ??
-            "all"
-          }
-          onValueChange={(value) => {
-            table
-              .getColumn("category_type")
-              ?.setFilterValue(value === "all" ? undefined : value);
-            table.setPageIndex(0);
-          }}
+          value={categoryTypeFilter}
+          onValueChange={setCategoryTypeFilter}
         >
           <SelectTrigger className="w-full md:w-52">
             <SelectValue placeholder="Tipo de gasto" />
@@ -858,58 +663,45 @@ export function TransactionsTable() {
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-muted-foreground text-sm">
-          {table.getFilteredRowModel().rows.length} resultado(s)
+          {tableTransactions.length} resultado(s) cargados
         </p>
         <div className="flex items-center gap-2">
-          <Select
-            value={String(table.getState().pagination.pageSize)}
-            onValueChange={(value) => table.setPageSize(Number(value))}
-          >
-            <SelectTrigger className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="10">10 / pág</SelectItem>
-              <SelectItem value="20">20 / pág</SelectItem>
-              <SelectItem value="50">50 / pág</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-          >
-            Anterior
-          </Button>
-          <span className="text-sm">
-            Página {table.getState().pagination.pageIndex + 1} de{" "}
-            {Math.max(table.getPageCount(), 1)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-          >
-            Siguiente
-          </Button>
+          {hasNextPage ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+            >
+              {isFetchingNextPage ? "Cargando..." : "Cargar más"}
+            </Button>
+          ) : (
+            <span className="text-muted-foreground text-sm">
+              No hay más resultados
+            </span>
+          )}
         </div>
       </div>
 
-      <TransactionDialog
-        transaction={editingTx}
-        monthId={selectedMonthId}
-        open={txDialogOpen}
-        onOpenChange={setTxDialogOpen}
-      />
+      <div ref={loadMoreRef} className="h-1 w-full" />
 
-      <TransferDialog
-        transfer={editingTransfer}
-        monthId={selectedMonthId}
-        open={transferDialogOpen}
-        onOpenChange={setTransferDialogOpen}
-      />
+      {(txDialogOpen || editingTx) && (
+        <TransactionDialog
+          transaction={editingTx}
+          monthId={selectedMonthId}
+          open={txDialogOpen}
+          onOpenChange={setTxDialogOpen}
+        />
+      )}
+
+      {(transferDialogOpen || editingTransfer) && (
+        <TransferDialog
+          transfer={editingTransfer}
+          monthId={selectedMonthId}
+          open={transferDialogOpen}
+          onOpenChange={setTransferDialogOpen}
+        />
+      )}
 
       <Dialog
         open={!!deletingTx}
@@ -1047,3 +839,160 @@ export function TransactionsTable() {
     </>
   );
 }
+
+const TransactionsToolbar = memo(function TransactionsToolbar({
+  selectedMonthId,
+  monthOptions,
+  isClosedMonth,
+  isBusy,
+  isCreatingMonth,
+  onMonthChange,
+  onCreateNextMonth,
+  onCreateTransfer,
+  onCreateTransaction,
+}: {
+  selectedMonthId: string | null;
+  monthOptions: Array<{ id: string; label: string }>;
+  isClosedMonth: boolean;
+  isBusy: boolean;
+  isCreatingMonth: boolean;
+  onMonthChange: (value: string) => void;
+  onCreateNextMonth: () => void;
+  onCreateTransfer: () => void;
+  onCreateTransaction: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-2">
+        <Select value={selectedMonthId ?? ""} onValueChange={onMonthChange} disabled={isBusy}>
+          <SelectTrigger className="w-52">
+            <SelectValue placeholder="Seleccionar mes" />
+          </SelectTrigger>
+          <SelectContent>
+            {monthOptions.map((month) => (
+              <SelectItem key={month.id} value={month.id}>
+                {month.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" onClick={onCreateNextMonth} disabled={isCreatingMonth}>
+          {isCreatingMonth ? "Calculando..." : "Nuevo mes"}
+        </Button>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          onClick={onCreateTransfer}
+          size="sm"
+          variant="outline"
+          disabled={!selectedMonthId || isClosedMonth}
+        >
+          <ArrowLeftRight className="mr-1 size-4" />
+          Transferencia
+        </Button>
+        <Button onClick={onCreateTransaction} size="sm" disabled={!selectedMonthId || isClosedMonth}>
+          <Plus className="mr-1 size-4" />
+          Nueva transacción
+        </Button>
+      </div>
+    </div>
+  );
+});
+
+const TransactionsSummaryCards = memo(function TransactionsSummaryCards({
+  monthSummary,
+  baseCurrencySymbol,
+}: {
+  monthSummary: ReturnType<typeof useMonthSummary>["monthSummary"];
+  baseCurrencySymbol: string;
+}) {
+  const cards = [
+    { label: "Saldo apertura", value: monthSummary.openingBase, tone: amountTone(monthSummary.openingBase) },
+    { label: "Ingresos", value: Math.abs(monthSummary.income), tone: "text-green-600" },
+    { label: "Gastos Esenciales", value: Math.abs(monthSummary.essentialExpenses), tone: "text-red-600" },
+    { label: "Gastos Discrecionales", value: Math.abs(monthSummary.discretionaryExpenses), tone: "text-orange-600" },
+    { label: "Pago de Deudas", value: Math.abs(monthSummary.debtPayments), tone: "text-rose-600" },
+    { label: "Ahorros", value: Math.abs(monthSummary.savings), tone: "text-cyan-600" },
+    { label: "Inversiones", value: Math.abs(monthSummary.investments), tone: "text-indigo-600" },
+    { label: "Saldo cierre", value: monthSummary.closingBase, tone: amountTone(monthSummary.closingBase) },
+  ];
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {cards.map((card) => (
+        <Card key={card.label} className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-2">
+            <CardDescription>{card.label}</CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className={`text-2xl font-semibold ${card.tone}`}>
+              {baseCurrencySymbol ? `${baseCurrencySymbol} ` : ""}
+              {formatAmount(card.value)}
+            </p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+});
+
+const TransactionsAccountBalances = memo(function TransactionsAccountBalances({
+  selectedMonth,
+  accountMonthlyBalances,
+  investmentByAccount,
+}: {
+  selectedMonth: Month | null;
+  accountMonthlyBalances: ReturnType<typeof useMonthSummary>["accountMonthlyBalances"];
+  investmentByAccount: Map<string, number>;
+}) {
+  if (!selectedMonth) return null;
+
+  return (
+    <div className="rounded-md border p-3 sm:p-4">
+      <p className="text-base font-semibold">
+        Saldos por cuenta - {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
+      </p>
+      <p className="text-muted-foreground mb-3 text-xs">
+        Inicio y cierre del mes seleccionado.
+      </p>
+      {accountMonthlyBalances.length > 0 ? (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {accountMonthlyBalances.map((account) => {
+            const invTotal = investmentByAccount.get(account.accountId) ?? 0;
+            return (
+              <div key={account.name} className="bg-muted/20 space-y-2 rounded-md border px-3 py-2.5">
+                <p className="text-foreground truncate text-sm font-semibold">
+                  {account.name} ({account.currencyCode})
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Inicio del mes</span>
+                  <span className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.opening)}`}>
+                    {account.symbol} {formatAmount(account.opening)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Final del mes</span>
+                  <span className={`whitespace-nowrap text-sm font-semibold ${amountTone(account.closing)}`}>
+                    {account.symbol} {formatAmount(account.closing)}
+                  </span>
+                </div>
+                {invTotal > 0 && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Inversiones</span>
+                    <span className="whitespace-nowrap text-sm font-semibold text-indigo-600">
+                      {account.symbol} {formatAmount(invTotal)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          No hay saldos iniciales cargados para este mes.
+        </p>
+      )}
+    </div>
+  );
+});

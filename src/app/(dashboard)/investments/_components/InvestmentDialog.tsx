@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -105,13 +105,20 @@ export function InvestmentDialog({
     [accounts]
   );
 
+  const watchAccountId = useWatch({ control: form.control, name: "account_id" });
+  const watchAssetType = useWatch({ control: form.control, name: "asset_type" });
+  const watchSkipDeduction = useWatch({
+    control: form.control,
+    name: "skip_deduction",
+  });
+
   const selectedAccount = useMemo(
-    () => investmentAccounts.find((a) => a.id === form.watch("account_id")),
-    [investmentAccounts, form.watch("account_id")]
+    () => investmentAccounts.find((a) => a.id === watchAccountId),
+    [investmentAccounts, watchAccountId],
   );
 
   const isBroker = selectedAccount?.account_type === "investment_broker";
-  const isCrypto = form.watch("asset_type") === "crypto";
+  const isCrypto = watchAssetType === "crypto";
   const maxDec = 7;
 
   useEffect(() => {
@@ -448,7 +455,7 @@ export function InvestmentDialog({
                     </FormItem>
                   )}
                 />
-                {!form.watch("skip_deduction") && (
+                {!watchSkipDeduction && (
                   <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
                     <AlertCircle className="mt-0.5 size-4 shrink-0" />
                     <span>

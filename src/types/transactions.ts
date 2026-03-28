@@ -54,3 +54,16 @@ export interface TransactionWithRelations extends Transaction {
   category_type: BudgetCategoryType | null;
   amounts: TransactionAmountWithRelations[];
 }
+
+export interface TransactionFeedFilters {
+  search?: string;
+  transaction_type?: TransactionType | null;
+  account_id?: string | null;
+  category_id?: string | null;
+  category_type?: BudgetCategoryType | null;
+}
+
+export interface TransactionFeedPage {
+  items: TransactionWithRelations[];
+  nextOffset: number | null;
+}

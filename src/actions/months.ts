@@ -455,111 +455,44 @@ export async function getOpeningBalances(
 
     const supabase = await createClient();
 
-    // Obtener año/mes del mes para poder fijar una fecha de referencia de FX (primer día del mes)
-    const { data: monthRow, error: monthError } = await supabase
-      .from("months")
-      .select("year, month")
-      .eq("id", monthId)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (monthError) return { error: monthError.message };
-    if (!monthRow) return { error: "Mes no encontrado" };
-
-    const fxDate = `${monthRow.year}-${String(monthRow.month).padStart(
-      2,
-      "0",
-    )}-01`;
-
-    // Moneda base actual del usuario
-    const { data: prefsRow } = await supabase
-      .from("user_preferences")
-      .select("base_currency")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const baseCurrency = prefsRow?.base_currency ?? "USD";
-
-    const { data, error } = await supabase
-      .from("opening_balances")
-      .select(
-        `
-        *,
-        accounts!inner ( id, user_id, name, currency )
-      `
-      )
-      .eq("month_id", monthId)
-      .eq("accounts.user_id", userId)
-      .order("created_at", { ascending: true });
+    const { data, error } = await supabase.rpc(
+      "opening_balances_with_current_base",
+      {
+        p_month_id: monthId,
+        p_base_currency: null,
+      },
+    );
 
     if (error) return { error: error.message };
 
-    const currencyCodes = Array.from(
-      new Set(
-        (data ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((row: any) => row.accounts?.currency)
-          .filter(Boolean)
-      )
-    );
-    const symbolByCode = new Map<string, string>();
-
-    if (currencyCodes.length > 0) {
-      const { data: currencyRows } = await supabase
-        .from("currencies")
-        .select("code, symbol")
-        .in("code", currencyCodes);
-      for (const row of currencyRows ?? []) {
-        symbolByCode.set(row.code, row.symbol);
-      }
-    }
-
-    const fxCache = new Map<string, number>();
-
-    const getRate = async (from: string): Promise<number> => {
-      if (from === baseCurrency) return 1;
-      const key = `${fxDate}:${from}:${baseCurrency}`;
-      const cached = fxCache.get(key);
-      if (cached != null) return cached;
-      const result = await getOrFetchFxRate({
-        date: fxDate,
-        from,
-        to: baseCurrency,
-      });
-      if ("error" in result) {
-        throw new Error(result.error);
-      }
-      fxCache.set(key, result.data);
-      return result.data;
-    };
-
-    const mapped: OpeningBalance[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const row of (data ?? []) as any[]) {
-      const opening_amount = Number(row.opening_amount);
-      const opening_base_amount = Number(row.opening_base_amount);
-      const accountCurrency = row.accounts?.currency ?? "";
-
-      let currentOpeningBase: number | undefined;
-      if (opening_amount && accountCurrency) {
-        const rate = await getRate(accountCurrency);
-        currentOpeningBase = opening_amount * rate;
-      }
-
-      mapped.push({
+    return {
+      data: ((data ?? []) as Array<{
+        id: string;
+        month_id: string;
+        account_id: string;
+        opening_amount: number | string;
+        opening_base_amount: number | string;
+        created_at: string;
+        account_name: string;
+        account_currency: string;
+        account_currency_symbol: string;
+        current_opening_base_amount: number | string | null;
+      }>).map((row) => ({
         id: row.id,
         month_id: row.month_id,
         account_id: row.account_id,
-        opening_amount,
-        opening_base_amount,
+        opening_amount: Number(row.opening_amount),
+        opening_base_amount: Number(row.opening_base_amount),
         created_at: row.created_at,
-        account_name: row.accounts?.name ?? "",
-        account_currency: accountCurrency,
-        account_currency_symbol:
-          symbolByCode.get(accountCurrency) ?? accountCurrency ?? "",
-        current_opening_base_amount: currentOpeningBase,
-      });
-    }
-
-    return { data: mapped };
+        account_name: row.account_name,
+        account_currency: row.account_currency,
+        account_currency_symbol: row.account_currency_symbol,
+        current_opening_base_amount:
+          row.current_opening_base_amount != null
+            ? Number(row.current_opening_base_amount)
+            : undefined,
+      })),
+    };
   } catch {
     return { error: "Error al obtener saldos iniciales" };
   }

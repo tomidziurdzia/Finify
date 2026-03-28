@@ -1,7 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import {
   getNwItems,
   createNwItem,
@@ -27,6 +32,9 @@ const NW_KEYS = {
   month: (year: number, month: number) =>
     ["net-worth", "month", year, month] as const,
   year: (year: number) => ["net-worth", "year", year] as const,
+  accounts: (year: number) => ["net-worth", "accounts", year] as const,
+  liabilities: (year: number) => ["net-worth", "liabilities", year] as const,
+  evolution: (year: number) => ["net-worth", "evolution", year] as const,
 };
 
 export function useNwItems() {
@@ -38,6 +46,7 @@ export function useNwItems() {
       return result.data;
     },
     staleTime: 10 * 60_000,
+    gcTime: 20 * 60_000,
   });
 }
 
@@ -178,16 +187,15 @@ export function useUpsertNwSnapshot(year: number) {
       queryClient.invalidateQueries({
         queryKey: NW_KEYS.month(input.year, input.month),
       });
-      queryClient.invalidateQueries({
-        queryKey: ["net-worth", "evolution", year],
-      });
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.evolution(year) });
+      queryClient.invalidateQueries({ queryKey: NW_KEYS.liabilities(year) });
     },
   });
 }
 
 export function useAccountNetWorth(year: number) {
   return useQuery({
-    queryKey: ["net-worth", "accounts", year],
+    queryKey: NW_KEYS.accounts(year),
     enabled: year > 0,
     queryFn: async () => {
       const result = await getAccountNetWorth(year);
@@ -195,6 +203,20 @@ export function useAccountNetWorth(year: number) {
       return result.data;
     },
     staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
+  });
+}
+
+export function useSuspenseAccountNetWorth(year: number) {
+  return useSuspenseQuery({
+    queryKey: NW_KEYS.accounts(year),
+    queryFn: async () => {
+      const result = await getAccountNetWorth(year);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
   });
 }
 
@@ -234,7 +256,7 @@ export function useCreateDebt() {
 
 export function useLiabilitiesForYear(year: number) {
   return useQuery({
-    queryKey: ["net-worth", "liabilities", year],
+    queryKey: NW_KEYS.liabilities(year),
     enabled: year > 0,
     queryFn: async () => {
       const result = await getLiabilitiesForYear(year);
@@ -242,12 +264,26 @@ export function useLiabilitiesForYear(year: number) {
       return result.data;
     },
     staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
+  });
+}
+
+export function useSuspenseLiabilitiesForYear(year: number) {
+  return useSuspenseQuery({
+    queryKey: NW_KEYS.liabilities(year),
+    queryFn: async () => {
+      const result = await getLiabilitiesForYear(year);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
   });
 }
 
 export function useNetWorthEvolution(year: number) {
   return useQuery({
-    queryKey: ["net-worth", "evolution", year],
+    queryKey: NW_KEYS.evolution(year),
     enabled: year > 0,
     queryFn: async () => {
       const result = await getNetWorthEvolution(year);
@@ -255,5 +291,19 @@ export function useNetWorthEvolution(year: number) {
       return result.data;
     },
     staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
+  });
+}
+
+export function useSuspenseNetWorthEvolution(year: number) {
+  return useSuspenseQuery({
+    queryKey: NW_KEYS.evolution(year),
+    queryFn: async () => {
+      const result = await getNetWorthEvolution(year);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
   });
 }

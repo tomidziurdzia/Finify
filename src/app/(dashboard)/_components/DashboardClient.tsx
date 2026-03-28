@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Select,
   SelectContent,
@@ -46,8 +46,20 @@ export function DashboardClient() {
     () => [...(months ?? [])].sort((a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month)),
     [months]
   );
-  const fromMonth = sortedMonths.find((m) => m.id === fromMonthId) ?? null;
-  const toMonth = sortedMonths.find((m) => m.id === toMonthId) ?? null;
+  const monthById = useMemo(
+    () => new Map(sortedMonths.map((month) => [month.id, month])),
+    [sortedMonths],
+  );
+  const monthOptions = useMemo(
+    () =>
+      sortedMonths.map((month) => ({
+        id: month.id,
+        label: `${MONTH_NAMES[month.month - 1]} ${month.year}`,
+      })),
+    [sortedMonths],
+  );
+  const fromMonth = (fromMonthId ? monthById.get(fromMonthId) : null) ?? null;
+  const toMonth = (toMonthId ? monthById.get(toMonthId) : null) ?? null;
 
   useEffect(() => {
     if (!months || months.length > 0 || ensureCurrentMonth.isPending) return;
@@ -117,8 +129,9 @@ export function DashboardClient() {
     );
   }
 
-  const isRange =
-    fromMonth && toMonth && fromMonthId !== toMonthId;
+  const isRange = Boolean(
+    fromMonth && toMonth && fromMonthId !== toMonthId,
+  );
 
   return (
     <div className="space-y-6">
@@ -131,47 +144,101 @@ export function DashboardClient() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">Desde</span>
-          <Select
-            value={fromMonthId ?? ""}
-            onValueChange={setFromMonthId}
-            disabled={ensureCurrentMonth.isPending}
-          >
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Mes inicial" />
-            </SelectTrigger>
-            <SelectContent>
-              {sortedMonths.map((month) => (
-                <SelectItem key={month.id} value={month.id}>
-                  {MONTH_NAMES[month.month - 1]} {month.year}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">Hasta</span>
-          <Select
-            value={toMonthId ?? ""}
-            onValueChange={setToMonthId}
-            disabled={ensureCurrentMonth.isPending}
-          >
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Mes final" />
-            </SelectTrigger>
-            <SelectContent>
-              {sortedMonths.map((month) => (
-                <SelectItem key={month.id} value={month.id}>
-                  {MONTH_NAMES[month.month - 1]} {month.year}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      <DashboardRangeSelector
+        fromMonthId={fromMonthId}
+        toMonthId={toMonthId}
+        monthOptions={monthOptions}
+        disabled={ensureCurrentMonth.isPending}
+        onFromMonthChange={setFromMonthId}
+        onToMonthChange={setToMonthId}
+      />
 
+      <DashboardContent
+        isRange={isRange}
+        monthSummary={monthSummary}
+        budgetSummary={budgetSummary}
+        currencySymbol={currencySymbol}
+        accountMonthlyBalances={accountMonthlyBalances}
+        fromMonth={fromMonth}
+        toMonth={toMonth}
+        baseCurrency={baseCurrency ?? null}
+      />
+    </div>
+  );
+}
+
+const DashboardRangeSelector = memo(function DashboardRangeSelector({
+  fromMonthId,
+  toMonthId,
+  monthOptions,
+  disabled,
+  onFromMonthChange,
+  onToMonthChange,
+}: {
+  fromMonthId: string | null;
+  toMonthId: string | null;
+  monthOptions: Array<{ id: string; label: string }>;
+  disabled: boolean;
+  onFromMonthChange: (value: string) => void;
+  onToMonthChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground text-sm">Desde</span>
+        <Select value={fromMonthId ?? ""} onValueChange={onFromMonthChange} disabled={disabled}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Mes inicial" />
+          </SelectTrigger>
+          <SelectContent>
+            {monthOptions.map((month) => (
+              <SelectItem key={month.id} value={month.id}>
+                {month.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground text-sm">Hasta</span>
+        <Select value={toMonthId ?? ""} onValueChange={onToMonthChange} disabled={disabled}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Mes final" />
+          </SelectTrigger>
+          <SelectContent>
+            {monthOptions.map((month) => (
+              <SelectItem key={month.id} value={month.id}>
+                {month.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+});
+
+const DashboardContent = memo(function DashboardContent({
+  isRange,
+  monthSummary,
+  budgetSummary,
+  currencySymbol,
+  accountMonthlyBalances,
+  fromMonth,
+  toMonth,
+  baseCurrency,
+}: {
+  isRange: boolean;
+  monthSummary: Parameters<typeof SummaryCards>[0]["summary"];
+  budgetSummary: Parameters<typeof BudgetExecutionChart>[0]["budgetSummary"];
+  currencySymbol: string;
+  accountMonthlyBalances: Parameters<typeof AccountBalances>[0]["balances"];
+  fromMonth: Month | null;
+  toMonth: Month | null;
+  baseCurrency: string | null;
+}) {
+  return (
+    <>
       <SummaryCards summary={monthSummary} currencySymbol={currencySymbol} />
 
       {!isRange && (
@@ -204,9 +271,9 @@ export function DashboardClient() {
         balances={accountMonthlyBalances}
         selectedMonth={fromMonth}
         endMonth={toMonth}
-        baseCurrencyCode={baseCurrency ?? null}
+        baseCurrencyCode={baseCurrency}
         baseCurrencySymbol={currencySymbol}
       />
-    </div>
+    </>
   );
-}
+});

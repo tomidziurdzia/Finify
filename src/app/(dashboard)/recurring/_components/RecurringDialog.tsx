@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -91,7 +91,10 @@ export function RecurringDialog({
   const { data: categories } = useBudgetCategories();
   const { data: usageCounts } = useUsageCounts();
   const sortedAccounts = [...(accounts ?? [])].sort(
-    (a, b) => (usageCounts?.accountCounts[b.id] ?? 0) - (usageCounts?.accountCounts[a.id] ?? 0)
+    (a, b) =>
+      (usageCounts?.accountCounts[b.id] ?? 0) -
+        (usageCounts?.accountCounts[a.id] ?? 0) ||
+      a.name.localeCompare(b.name)
   );
   const createMutation = useCreateRecurring();
   const updateMutation = useUpdateRecurring();
@@ -198,7 +201,7 @@ export function RecurringDialog({
     (c) => c.category_type === "income"
   );
 
-  const watchType = form.watch("type");
+  const watchType = useWatch({ control: form.control, name: "type" });
   const relevantCategories =
     watchType === "income" ? incomeCategories : expenseCategories;
 

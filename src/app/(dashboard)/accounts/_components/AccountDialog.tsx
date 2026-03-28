@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -94,8 +94,11 @@ export function AccountDialog({
   const [fetchingRate, setFetchingRate] = useState(false);
   const baseManuallyEdited = useRef(false);
 
-  const watchCurrency = form.watch("currency");
-  const watchAccountType = form.watch("account_type");
+  const watchCurrency = useWatch({ control: form.control, name: "currency" });
+  const watchAccountType = useWatch({
+    control: form.control,
+    name: "account_type",
+  });
   const isCryptoWallet = watchAccountType === "crypto_wallet";
   const isCryptoExchange = watchAccountType === "crypto_exchange";
   const isCryptoType = isCryptoWallet || isCryptoExchange;

@@ -10,9 +10,7 @@ import {
   UpdateBudgetLineSchema,
   UpdateCategorySchema,
 } from "@/lib/validations/budget.schema";
-import { createMonth, getMonthsInRange } from "@/actions/months";
-import { getOrFetchFxRate } from "@/actions/fx";
-import { getBaseCurrency } from "@/actions/transactions";
+import { createMonth } from "@/actions/months";
 import type {
   BudgetCategory,
   BudgetLine,
@@ -57,21 +55,6 @@ function addMonths(
 
 function monthDiff(start: MonthLite, end: MonthLite): number {
   return (end.year - start.year) * 12 + (end.month - start.month);
-}
-
-function createFxRateResolver(baseCurrency: string) {
-  const fxCache = new Map<string, number>();
-  return async (date: string, from: string): Promise<number> => {
-    if (from === baseCurrency) return 1;
-    const key = `${date}:${from}:${baseCurrency}`;
-    const cached = fxCache.get(key);
-    if (cached != null) return cached;
-
-    const result = await getOrFetchFxRate({ date, from, to: baseCurrency });
-    if ("error" in result) throw new Error(result.error);
-    fxCache.set(key, result.data);
-    return result.data;
-  };
 }
 
 async function getMonthForUser(
@@ -692,124 +675,34 @@ export async function getBudgetSummaryVsActual(
   monthId: string,
 ): Promise<ActionResult<BudgetSummaryVsActual>> {
   try {
-    const baseCurrencyResult = await getBaseCurrency();
-    if ("error" in baseCurrencyResult) return baseCurrencyResult;
-    const baseCurrency = baseCurrencyResult.data;
-
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
     const month = await getMonthForUser(userId, monthId);
     if ("error" in month) return month;
 
     const supabase = await createClient();
-
-    // Parallel fetch: categories, lines, and transactions are independent
-    const [categoriesRes, linesRes, txRes] = await Promise.all([
-      supabase
-        .from("budget_categories")
-        .select("id, name, category_type, display_order")
-        .eq("user_id", userId)
-        .order("display_order", { ascending: true })
-        .order("name", { ascending: true }),
-      supabase
-        .from("budget_lines")
-        .select("id, category_id")
-        .eq("user_id", userId),
-      supabase
-        .from("transactions")
-        .select(
-          `
-          date,
-          category_id,
-          transaction_amounts ( amount, original_currency )
-        `,
-        )
-        .eq("user_id", userId)
-        .eq("month_id", monthId)
-        .is("deleted_at", null)
-        .not("category_id", "is", null)
-        // Transfers are excluded from budget comparison because they move
-        // money between accounts without generating income or expense.
-        .neq("transaction_type", "transfer"),
-    ]);
-
-    if (categoriesRes.error) return { error: categoriesRes.error.message };
-    if (linesRes.error) return { error: linesRes.error.message };
-    if (txRes.error) return { error: txRes.error.message };
-
-    const categories = categoriesRes.data;
-    const lines = linesRes.data;
-    const txRows = txRes.data;
-
-    const lineIds = (lines ?? []).map((line) => line.id);
-    const lineToCategory = new Map(
-      (lines ?? []).map((line) => [line.id, line.category_id]),
-    );
-
-    const plannedByCategory = new Map<string, number>();
-    if (lineIds.length > 0) {
-      const { data: plans, error: plansError } = await supabase
-        .from("budget_month_plans")
-        .select("line_id, planned_amount")
-        .eq("month_id", monthId)
-        .in("line_id", lineIds);
-      if (plansError) return { error: plansError.message };
-
-      for (const plan of plans ?? []) {
-        const categoryId = lineToCategory.get(plan.line_id);
-        if (!categoryId) continue;
-        const current = plannedByCategory.get(categoryId) ?? 0;
-        plannedByCategory.set(
-          categoryId,
-          current + Number(plan.planned_amount),
-        );
-      }
-    }
-
-    const categoryTypeById = new Map(
-      (categories ?? []).map((category) => [
-        category.id,
-        category.category_type,
-      ]),
-    );
-    const actualByCategory = new Map<string, number>();
-
-    const getRate = createFxRateResolver(baseCurrency);
-
-    for (const row of (txRows ?? []) as any[]) {
-      const categoryId = row.category_id as string | null;
-      if (!categoryId) continue;
-      const txDate = row.date as string;
-      if (!txDate) continue;
-
-      let sumBase = 0;
-      for (const amountRow of row.transaction_amounts ?? []) {
-        const from = amountRow.original_currency as string;
-        const amount = Number(amountRow.amount);
-        if (!from || !amount) continue;
-        const rate = await getRate(txDate, from);
-        sumBase += amount * rate;
-      }
-
-      const categoryType = categoryTypeById.get(categoryId);
-      const normalized =
-        categoryType === "income" ? sumBase : Math.abs(sumBase);
-      const current = actualByCategory.get(categoryId) ?? 0;
-      actualByCategory.set(categoryId, current + normalized);
-    }
-
-    const categorySummary = (categories ?? []).map((category) => {
-      const planned = plannedByCategory.get(category.id) ?? 0;
-      const actual = actualByCategory.get(category.id) ?? 0;
-      return {
-        category_id: category.id,
-        category_name: category.name,
-        category_type: category.category_type,
-        planned_amount: planned,
-        actual_amount: actual,
-        variance: planned - actual,
-      };
+    const { data, error } = await supabase.rpc("budget_summary_vs_actual", {
+      p_month_id: monthId,
+      p_base_currency: null,
     });
+
+    if (error) return { error: error.message };
+
+    const categorySummary = ((data ?? []) as Array<{
+      category_id: string;
+      category_name: string;
+      category_type: BudgetSummaryVsActual["categories"][number]["category_type"];
+      planned_amount: number | string | null;
+      actual_amount: number | string | null;
+      variance: number | string | null;
+    }>).map((category) => ({
+      category_id: category.category_id,
+      category_name: category.category_name,
+      category_type: category.category_type,
+      planned_amount: Number(category.planned_amount ?? 0),
+      actual_amount: Number(category.actual_amount ?? 0),
+      variance: Number(category.variance ?? 0),
+    }));
 
     const totals = categorySummary.reduce(
       (acc, category) => ({
@@ -835,126 +728,41 @@ export async function getBudgetSummaryVsActualForRange(
   startMonthId: string,
   endMonthId: string,
 ): Promise<ActionResult<BudgetSummaryVsActual>> {
-  const monthsResult = await getMonthsInRange(startMonthId, endMonthId);
-  if ("error" in monthsResult) return monthsResult;
-  const monthIds = monthsResult.data.map((m) => m.id);
-  if (monthIds.length === 0) {
-    return {
-      data: {
-        totals: { planned: 0, actual: 0, variance: 0 },
-        categories: [],
-      },
-    };
-  }
-
   try {
-    const baseCurrencyResult = await getBaseCurrency();
-    if ("error" in baseCurrencyResult) return baseCurrencyResult;
-    const baseCurrency = baseCurrencyResult.data;
-
     const userId = await getUserId();
     if (!userId) return { error: "No autenticado" };
+    const startMonth = await getMonthForUser(userId, startMonthId);
+    if ("error" in startMonth) return startMonth;
+    const endMonth = await getMonthForUser(userId, endMonthId);
+    if ("error" in endMonth) return endMonth;
 
     const supabase = await createClient();
-    const { data: categories, error: categoriesError } = await supabase
-      .from("budget_categories")
-      .select("id, name, category_type, display_order")
-      .eq("user_id", userId)
-      .order("display_order", { ascending: true })
-      .order("name", { ascending: true });
-    if (categoriesError) return { error: categoriesError.message };
-
-    const { data: lines, error: linesError } = await supabase
-      .from("budget_lines")
-      .select("id, category_id")
-      .eq("user_id", userId);
-    if (linesError) return { error: linesError.message };
-
-    const lineIds = (lines ?? []).map((line) => line.id);
-    const lineToCategory = new Map(
-      (lines ?? []).map((line) => [line.id, line.category_id]),
+    const { data, error } = await supabase.rpc(
+      "budget_summary_vs_actual_range",
+      {
+        p_start_month_id: startMonthId,
+        p_end_month_id: endMonthId,
+        p_base_currency: null,
+      },
     );
 
-    const plannedByCategory = new Map<string, number>();
-    if (lineIds.length > 0) {
-      const { data: plans, error: plansError } = await supabase
-        .from("budget_month_plans")
-        .select("line_id, planned_amount")
-        .in("month_id", monthIds)
-        .in("line_id", lineIds);
-      if (plansError) return { error: plansError.message };
+    if (error) return { error: error.message };
 
-      for (const plan of plans ?? []) {
-        const categoryId = lineToCategory.get(plan.line_id);
-        if (!categoryId) continue;
-        const current = plannedByCategory.get(categoryId) ?? 0;
-        plannedByCategory.set(
-          categoryId,
-          current + Number(plan.planned_amount),
-        );
-      }
-    }
-
-    const { data: txRows, error: txError } = await supabase
-      .from("transactions")
-      .select(
-        `
-        date,
-        category_id,
-        transaction_amounts ( amount, original_currency )
-      `,
-      )
-      .eq("user_id", userId)
-      .in("month_id", monthIds)
-      .is("deleted_at", null)
-      .not("category_id", "is", null)
-      .neq("transaction_type", "transfer");
-    if (txError) return { error: txError.message };
-
-    const categoryTypeById = new Map(
-      (categories ?? []).map((category) => [
-        category.id,
-        category.category_type,
-      ]),
-    );
-    const actualByCategory = new Map<string, number>();
-
-    const getRate = createFxRateResolver(baseCurrency);
-
-    for (const row of (txRows ?? []) as any[]) {
-      const categoryId = row.category_id as string | null;
-      if (!categoryId) continue;
-      const txDate = row.date as string;
-      if (!txDate) continue;
-
-      let sumBase = 0;
-      for (const amountRow of row.transaction_amounts ?? []) {
-        const from = amountRow.original_currency as string;
-        const amount = Number(amountRow.amount);
-        if (!from || !amount) continue;
-        const rate = await getRate(txDate, from);
-        sumBase += amount * rate;
-      }
-
-      const categoryType = categoryTypeById.get(categoryId);
-      const normalized =
-        categoryType === "income" ? sumBase : Math.abs(sumBase);
-      const current = actualByCategory.get(categoryId) ?? 0;
-      actualByCategory.set(categoryId, current + normalized);
-    }
-
-    const categorySummary = (categories ?? []).map((category) => {
-      const planned = plannedByCategory.get(category.id) ?? 0;
-      const actual = actualByCategory.get(category.id) ?? 0;
-      return {
-        category_id: category.id,
-        category_name: category.name,
-        category_type: category.category_type,
-        planned_amount: planned,
-        actual_amount: actual,
-        variance: planned - actual,
-      };
-    });
+    const categorySummary = ((data ?? []) as Array<{
+      category_id: string;
+      category_name: string;
+      category_type: BudgetSummaryVsActual["categories"][number]["category_type"];
+      planned_amount: number | string | null;
+      actual_amount: number | string | null;
+      variance: number | string | null;
+    }>).map((category) => ({
+      category_id: category.category_id,
+      category_name: category.category_name,
+      category_type: category.category_type,
+      planned_amount: Number(category.planned_amount ?? 0),
+      actual_amount: Number(category.actual_amount ?? 0),
+      variance: Number(category.variance ?? 0),
+    }));
 
     const totals = categorySummary.reduce(
       (acc, category) => ({

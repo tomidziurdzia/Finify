@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
-import { useForm } from "react-hook-form";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -115,20 +115,40 @@ export function TransactionDialog({
 
   const { data: usageCounts } = useUsageCounts();
   const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
-  const sortedAccounts = [...activeAccounts].sort(
-    (a, b) => (usageCounts?.accountCounts[b.id] ?? 0) - (usageCounts?.accountCounts[a.id] ?? 0)
+  const sortedAccounts = useMemo(
+    () =>
+      [...activeAccounts].sort(
+        (a, b) =>
+          (usageCounts?.accountCounts[b.id] ?? 0) -
+            (usageCounts?.accountCounts[a.id] ?? 0) ||
+          a.name.localeCompare(b.name),
+      ),
+    [activeAccounts, usageCounts?.accountCounts],
   );
 
-  const watchTransactionType = form.watch("transaction_type");
-  const watchAccountId = form.watch("account_id");
-  const watchDate = form.watch("date");
+  const watchTransactionType = useWatch({
+    control: form.control,
+    name: "transaction_type",
+  });
+  const watchAccountId = useWatch({
+    control: form.control,
+    name: "account_id",
+  });
+  const watchDate = useWatch({
+    control: form.control,
+    name: "date",
+  });
+  const watchAmount = useWatch({
+    control: form.control,
+    name: "amount",
+  });
 
   const selectedAccount = activeAccounts.find((a) => a.id === watchAccountId);
 
   const showCategory = watchTransactionType !== "transfer";
 
   // Filter categories by transaction type
-  const filteredCategories = (() => {
+  const filteredCategories = useMemo(() => {
     const all = categories ?? [];
     if (watchTransactionType === "income") {
       return all.filter((c) => c.category_type === "income");
@@ -136,15 +156,14 @@ export function TransactionDialog({
     if (watchTransactionType === "expense") {
       return all.filter((c) => c.category_type !== "income");
     }
-    // correction → all categories
     return all;
-  })();
+  }, [categories, watchTransactionType]);
 
   // Track whether the user manually edited base_amount
   const baseManuallyEdited = useRef(false);
   // Keep a ref to amount for async FX callback
   const amountRef = useRef(form.getValues("amount"));
-  amountRef.current = form.watch("amount");
+  amountRef.current = watchAmount;
 
   // Auto-fetch exchange rate from Frankfurter when account or date changes
   useEffect(() => {
@@ -473,7 +492,38 @@ export function TransactionDialog({
               />
             </div>
 
-          {/* Row 2: Cuenta + Categoría */}
+          {/* Row 2: Descripción */}
+          <FormField
+            control={form.control}
+            name="description"
+            render={({ field }) => (
+              <FormItem>
+                <FormFieldLabel>Descripción</FormFieldLabel>
+                <FormControl>
+                  <Input
+                    placeholder="Ej: Supermercado, Sueldo, etc."
+                    disabled={isPending}
+                    {...field}
+                    onBlur={(e) => {
+                      field.onBlur();
+                      if (e.target.value.trim()) {
+                        handleDescriptionBlur();
+                      }
+                    }}
+                  />
+                </FormControl>
+                {appliedRuleRef.current && !isEditing && (
+                  <Badge variant="secondary" className="text-xs gap-1">
+                    <Sparkles className="size-3" />
+                    Auto-categorizado: {appliedRuleRef.current}
+                  </Badge>
+                )}
+                <FormMessage />
+              </FormItem>
+              )}
+            />
+
+          {/* Row 3: Cuenta + Categoría */}
           <div
             className={`grid gap-4 ${showCategory ? "grid-cols-2" : "grid-cols-1"}`}
           >
@@ -518,37 +568,6 @@ export function TransactionDialog({
               />
             )}
           </div>
-
-          {/* Row 3: Descripción */}
-          <FormField
-            control={form.control}
-            name="description"
-            render={({ field }) => (
-              <FormItem>
-                <FormFieldLabel>Descripción</FormFieldLabel>
-                <FormControl>
-                  <Input
-                    placeholder="Ej: Supermercado, Sueldo, etc."
-                    disabled={isPending}
-                    {...field}
-                    onBlur={(e) => {
-                      field.onBlur();
-                      if (e.target.value.trim()) {
-                        handleDescriptionBlur();
-                      }
-                    }}
-                  />
-                </FormControl>
-                {appliedRuleRef.current && !isEditing && (
-                  <Badge variant="secondary" className="text-xs gap-1">
-                    <Sparkles className="size-3" />
-                    Auto-categorizado: {appliedRuleRef.current}
-                  </Badge>
-                )}
-                <FormMessage />
-              </FormItem>
-            )}
-          />
 
           {/* Row 4: Monto + TC + Monto base */}
           <div className="grid grid-cols-3 gap-4">

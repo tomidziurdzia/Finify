@@ -1,6 +1,11 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import {
   createBudgetNextMonthFromSource,
   createBudgetLine,
@@ -35,11 +40,13 @@ import type {
 } from "@/lib/validations/budget.schema";
 import { toast } from "sonner";
 
-const BUDGET_KEYS = {
+export const BUDGET_KEYS = {
   years: ["budget", "years"] as const,
   categories: ["budget", "categories"] as const,
   lines: (monthId: string) => ["budget", "lines", monthId] as const,
   summary: (monthId: string) => ["budget", "summary", monthId] as const,
+  summaryRange: (startMonthId: string, endMonthId: string) =>
+    ["budget", "summary-range", startMonthId, endMonthId] as const,
 };
 
 export function useBudgetYears() {
@@ -87,6 +94,18 @@ export function useEnsureBudgetSeed() {
 
 export function useBudgetCategories() {
   return useQuery({
+    queryKey: BUDGET_KEYS.categories,
+    queryFn: async () => {
+      const result = await getBudgetCategories();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: Infinity,
+  });
+}
+
+export function useSuspenseBudgetCategories() {
+  return useSuspenseQuery({
     queryKey: BUDGET_KEYS.categories,
     queryFn: async () => {
       const result = await getBudgetCategories();
@@ -222,6 +241,18 @@ export function useBudgetLines(monthId: string | null) {
     enabled: !!monthId,
     queryFn: async () => {
       if (!monthId) return [];
+      const result = await getBudgetLines(monthId);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSuspenseBudgetLines(monthId: string) {
+  return useSuspenseQuery<BudgetLineWithPlan[]>({
+    queryKey: BUDGET_KEYS.lines(monthId),
+    queryFn: async () => {
       const result = await getBudgetLines(monthId);
       if ("error" in result) throw new Error(result.error);
       return result.data;
@@ -498,6 +529,20 @@ export function useBudgetSummary(monthId: string | null) {
       return result.data;
     },
     staleTime: 60_000,
+    gcTime: 10 * 60_000,
+  });
+}
+
+export function useSuspenseBudgetSummary(monthId: string) {
+  return useSuspenseQuery<BudgetSummaryVsActual>({
+    queryKey: BUDGET_KEYS.summary(monthId),
+    queryFn: async () => {
+      const result = await getBudgetSummaryVsActual(monthId);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
   });
 }
 
@@ -506,7 +551,7 @@ export function useBudgetSummaryForRange(
   endMonthId: string | null
 ) {
   return useQuery<BudgetSummaryVsActual>({
-    queryKey: ["budget", "summary", "range", startMonthId ?? "", endMonthId ?? ""],
+    queryKey: BUDGET_KEYS.summaryRange(startMonthId ?? "", endMonthId ?? ""),
     enabled: !!startMonthId && !!endMonthId,
     queryFn: async () => {
       if (!startMonthId || !endMonthId) {
@@ -522,5 +567,7 @@ export function useBudgetSummaryForRange(
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
   });
 }

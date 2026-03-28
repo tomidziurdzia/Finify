@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { InvestmentsTable } from "./_components/InvestmentsTable";
 
 export default function InvestmentsPage() {
@@ -9,7 +11,19 @@ export default function InvestmentsPage() {
           Registrá y seguí tus inversiones en acciones, ETFs, crypto y más.
         </p>
       </div>
-      <InvestmentsTable />
+      <Suspense fallback={<InvestmentsPageFallback />}>
+        <InvestmentsTable />
+      </Suspense>
+    </div>
+  );
+}
+
+function InvestmentsPageFallback() {
+  return (
+    <div className="space-y-3">
+      <Skeleton className="h-10 w-40" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-80 w-full" />
     </div>
   );
 }
