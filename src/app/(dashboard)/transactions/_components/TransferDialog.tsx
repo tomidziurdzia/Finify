@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +31,7 @@ import { CreateTransferSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
 import { fetchExchangeRate } from "@/lib/frankfurter";
 import type { TransactionWithRelations } from "@/types/transactions";
+import type { AccountType } from "@/types/accounts";
 import { format } from "date-fns";
 import { Loader2 } from "lucide-react";
 
@@ -39,6 +40,9 @@ interface TransferDialogProps {
   monthId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  allowedAccountTypes?: AccountType[];
+  title?: string;
+  description?: string;
 }
 
 type TransferFormValues = {
@@ -57,6 +61,9 @@ export function TransferDialog({
   monthId,
   open,
   onOpenChange,
+  allowedAccountTypes,
+  title,
+  description,
 }: TransferDialogProps) {
   const isEditing = !!transfer;
 
@@ -82,26 +89,50 @@ export function TransferDialog({
     createTransferMutation.isPending || updateMutation.isPending;
 
   const { data: usageCounts } = useUsageCounts();
-  const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
-  const sortedAccounts = [...activeAccounts].sort(
-    (a, b) => (usageCounts?.accountCounts[b.id] ?? 0) - (usageCounts?.accountCounts[a.id] ?? 0)
+  const activeAccounts = useMemo(
+    () =>
+      (accounts ?? []).filter(
+        (account) =>
+          account.is_active &&
+          (!allowedAccountTypes ||
+            allowedAccountTypes.includes(account.account_type)),
+      ),
+    [accounts, allowedAccountTypes],
+  );
+  const sortedAccounts = useMemo(
+    () =>
+      [...activeAccounts].sort(
+        (a, b) =>
+          (usageCounts?.accountCounts[b.id] ?? 0) -
+            (usageCounts?.accountCounts[a.id] ?? 0) ||
+          a.name.localeCompare(b.name),
+      ),
+    [activeAccounts, usageCounts?.accountCounts],
   );
 
-  const watchSourceId = form.watch("source_account_id");
-  const watchDestId = form.watch("destination_account_id");
-  const watchDate = form.watch("date");
+  const watchSourceId = useWatch({
+    control: form.control,
+    name: "source_account_id",
+  });
+  const watchDestId = useWatch({
+    control: form.control,
+    name: "destination_account_id",
+  });
+  const watchDate = useWatch({ control: form.control, name: "date" });
+  const watchAmount = useWatch({ control: form.control, name: "amount" });
 
   const sourceAccount = activeAccounts.find((a) => a.id === watchSourceId);
   const destAccount = activeAccounts.find((a) => a.id === watchDestId);
   const destinationCurrency = destAccount?.currency ?? "";
 
-  const filteredDestAccounts = activeAccounts.filter(
-    (a) => a.id !== watchSourceId
+  const filteredDestAccounts = useMemo(
+    () => sortedAccounts.filter((a) => a.id !== watchSourceId),
+    [sortedAccounts, watchSourceId],
   );
 
   const destinationManuallyEdited = useRef(false);
   const amountRef = useRef(form.getValues("amount"));
-  amountRef.current = form.watch("amount");
+  amountRef.current = watchAmount;
 
   const [fetchingRate, setFetchingRate] = useState(false);
 
@@ -199,7 +230,7 @@ export function TransferDialog({
           String(sourceLine?.exchange_rate ?? 1).replace(".", ",")
         ),
         destination_amount: formatNumberInput(
-          String(Math.abs(sourceLine?.base_amount ?? 0)).replace(".", ",")
+          String(Math.abs(destinationLine?.amount ?? 0)).replace(".", ",")
         ),
         notes: transfer.notes ?? "",
       });
@@ -295,7 +326,7 @@ export function TransferDialog({
             },
             {
               account_id: values.destination_account_id,
-              amount: Math.abs(isNaN(amountNum) ? 0 : amountNum),
+              amount: Math.abs(isNaN(destinationNum) ? 0 : destinationNum),
               exchange_rate: isNaN(rateNum) ? 1 : rateNum,
               base_amount: Math.abs(isNaN(destinationNum) ? 0 : destinationNum),
             },
@@ -351,12 +382,13 @@ export function TransferDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? "Editar transferencia" : "Nueva transferencia"}
+            {title ?? (isEditing ? "Editar transferencia" : "Nueva transferencia")}
           </DialogTitle>
           <DialogDescription>
-            {isEditing
-              ? "Modificá los datos de la transferencia."
-              : "Transferí fondos entre tus cuentas."}
+            {description ??
+              (isEditing
+                ? "Modificá los datos de la transferencia."
+                : "Transferí fondos entre tus cuentas.")}
           </DialogDescription>
         </DialogHeader>
 

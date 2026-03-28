@@ -1,6 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import {
   createNextMonthFromLatest,
   getMonths,
@@ -17,6 +22,18 @@ export const MONTH_KEYS = {
 
 export function useMonths() {
   return useQuery({
+    queryKey: MONTH_KEYS.all,
+    queryFn: async () => {
+      const result = await getMonths();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function useSuspenseMonths() {
+  return useSuspenseQuery({
     queryKey: MONTH_KEYS.all,
     queryFn: async () => {
       const result = await getMonths();

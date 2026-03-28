@@ -1,6 +1,11 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import {
   getAccounts,
   getCurrencies,
@@ -25,8 +30,32 @@ export function useAccounts() {
   });
 }
 
+export function useSuspenseAccounts() {
+  return useSuspenseQuery({
+    queryKey: ["accounts"],
+    queryFn: async () => {
+      const result = await getAccounts();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useCurrencies() {
   return useQuery({
+    queryKey: ["currencies"],
+    queryFn: async () => {
+      const result = await getCurrencies();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: Infinity,
+  });
+}
+
+export function useSuspenseCurrencies() {
+  return useSuspenseQuery({
     queryKey: ["currencies"],
     queryFn: async () => {
       const result = await getCurrencies();

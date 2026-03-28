@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import {
   CreateInvestmentSchema,
+  TransferInvestmentPositionSchema,
   UpdateInvestmentSchema,
 } from "@/lib/validations/investment.schema";
 import type {
@@ -297,6 +298,128 @@ export async function deleteInvestment(
     return { data: null };
   } catch {
     return { error: "Error al eliminar inversión" };
+  }
+}
+
+export async function transferInvestmentPosition(
+  input: unknown,
+): Promise<ActionResult<null>> {
+  try {
+    const parsed = TransferInvestmentPositionSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        error: parsed.error.issues[0]?.message ?? "Datos invalidos",
+      };
+    }
+
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    const { data: accounts, error: accountsError } = await supabase
+      .from("accounts")
+      .select("id, account_type")
+      .in("id", [
+        parsed.data.source_account_id,
+        parsed.data.destination_account_id,
+      ])
+      .eq("user_id", userId);
+
+    if (accountsError) return { error: accountsError.message };
+    if (!accounts || accounts.length !== 2) {
+      return { error: "Cuenta origen o destino no encontrada" };
+    }
+
+    const allowedTypes = new Set([
+      "investment_broker",
+      "crypto_exchange",
+      "crypto_wallet",
+    ]);
+    if (accounts.some((account) => !allowedTypes.has(account.account_type))) {
+      return { error: "Solo se puede mover posicion entre cuentas de inversion" };
+    }
+
+    const { data: sourceLots, error: sourceError } = await supabase
+      .from("investments")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("account_id", parsed.data.source_account_id)
+      .eq("asset_name", parsed.data.asset_name)
+      .eq("asset_type", parsed.data.asset_type)
+      .eq("currency", parsed.data.currency)
+      .order("purchase_date", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (sourceError) return { error: sourceError.message };
+
+    const matchingLots = (sourceLots ?? []).filter(
+      (lot) => (lot.ticker ?? null) === (parsed.data.ticker ?? null),
+    );
+
+    const availableQuantity = matchingLots.reduce(
+      (sum, lot) => sum + Number(lot.quantity),
+      0,
+    );
+
+    if (availableQuantity < parsed.data.quantity) {
+      return { error: "No hay cantidad suficiente para transferir" };
+    }
+
+    let remainingQuantity = parsed.data.quantity;
+
+    for (const lot of matchingLots) {
+      if (remainingQuantity <= 0) break;
+
+      const lotQuantity = Number(lot.quantity);
+      const movedQuantity = Math.min(lotQuantity, remainingQuantity);
+      const unitCost = lotQuantity > 0 ? Number(lot.total_cost) / lotQuantity : 0;
+      const movedCost = Number((movedQuantity * unitCost).toFixed(8));
+      const remainingLotQuantity = Number((lotQuantity - movedQuantity).toFixed(8));
+      const remainingLotCost = Number((Number(lot.total_cost) - movedCost).toFixed(8));
+
+      const { error: insertError } = await supabase.from("investments").insert({
+        user_id: userId,
+        account_id: parsed.data.destination_account_id,
+        asset_name: lot.asset_name,
+        ticker: lot.ticker,
+        asset_type: lot.asset_type,
+        quantity: movedQuantity,
+        price_per_unit: lot.price_per_unit,
+        total_cost: movedCost,
+        currency: lot.currency,
+        purchase_date: parsed.data.transfer_date,
+        notes: parsed.data.notes ?? `Transferido desde otra cuenta`,
+      });
+
+      if (insertError) return { error: insertError.message };
+
+      if (remainingLotQuantity <= 0.00000001) {
+        const { error: deleteError } = await supabase
+          .from("investments")
+          .delete()
+          .eq("id", lot.id)
+          .eq("user_id", userId);
+        if (deleteError) return { error: deleteError.message };
+      } else {
+        const { error: updateError } = await supabase
+          .from("investments")
+          .update({
+            quantity: remainingLotQuantity,
+            total_cost: remainingLotCost,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", lot.id)
+          .eq("user_id", userId);
+        if (updateError) return { error: updateError.message };
+      }
+
+      remainingQuantity = Number((remainingQuantity - movedQuantity).toFixed(8));
+    }
+
+    return { data: null };
+  } catch {
+    return { error: "Error al transferir posicion" };
   }
 }
 

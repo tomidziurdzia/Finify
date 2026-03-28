@@ -511,165 +511,48 @@ export async function getAccountNetWorth(
     if (!userId) return { error: "No autenticado" };
 
     const supabase = await createClient();
-
-    // 1. Encontrar el último mes del año seleccionado
-    const { data: latestMonth, error: monthError } = await supabase
-      .from("months")
-      .select("id, year, month")
-      .eq("user_id", userId)
-      .eq("year", year)
-      .order("month", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (monthError) return { error: monthError.message };
-
-    if (!latestMonth) {
-      return {
-        data: { year, month: 0, total: 0, accounts: [] },
-      };
-    }
-
-    // 2. Obtener cuentas activas con símbolo de moneda
-    const { data: accounts, error: accError } = await supabase
-      .from("accounts")
-      .select(
-        `
-        id, name, account_type, currency, is_active,
-        currencies ( symbol )
-      `
-      )
-      .eq("user_id", userId)
-      .eq("is_active", true)
-      .order("account_type")
-      .order("name");
-
-    if (accError) return { error: accError.message };
-
-    // 3. Opening balances para ese mes
-    const { data: openings, error: obError } = await supabase
-      .from("opening_balances")
-      .select("account_id, opening_amount, opening_base_amount")
-      .eq("month_id", latestMonth.id);
-
-    if (obError) return { error: obError.message };
-
-    // 4. Transacciones del mes → sumar montos por cuenta
-    const { data: txRows, error: txError } = await supabase
-      .from("transactions")
-      .select("transaction_amounts ( account_id, amount, base_amount )")
-      .eq("month_id", latestMonth.id)
-      .eq("user_id", userId)
-      .is("deleted_at", null);
-
-    if (txError) return { error: txError.message };
-
-    // 4b. Inversiones — sumar total_cost por cuenta
-    const { data: invRows, error: invError } = await supabase
-      .from("investments")
-      .select("account_id, total_cost, currency")
-      .eq("user_id", userId);
-
-    if (invError) return { error: invError.message };
-
-    // Acumular movimientos por account_id
-    const movByAccount = new Map<
-      string,
-      { amount: number; base_amount: number }
-    >();
-    for (const tx of txRows ?? []) {
-      const lines = Array.isArray(tx.transaction_amounts)
-        ? tx.transaction_amounts
-        : tx.transaction_amounts
-          ? [tx.transaction_amounts]
-          : [];
-      for (const line of lines) {
-        const cur = movByAccount.get(line.account_id) ?? {
-          amount: 0,
-          base_amount: 0,
-        };
-        cur.amount += Number(line.amount);
-        cur.base_amount += Number(line.base_amount);
-        movByAccount.set(line.account_id, cur);
-      }
-    }
-
-    // 5. Opening balances por cuenta
-    const obByAccount = new Map<
-      string,
-      { opening: number; opening_base: number }
-    >();
-    for (const ob of openings ?? []) {
-      obByAccount.set(ob.account_id, {
-        opening: Number(ob.opening_amount),
-        opening_base: Number(ob.opening_base_amount),
-      });
-    }
-
-    // 5b. Obtener base currency del usuario
-    const { data: userPref } = await supabase
-      .from("user_preferences")
-      .select("base_currency")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const baseCurrency = userPref?.base_currency ?? "EUR";
-
-    // 5c. Obtener últimas tasas FX para convertir inversiones a base
-    const allCurrencies = [
-      ...new Set([
-        ...(accounts ?? []).map((a) => a.currency),
-        ...(invRows ?? []).map((i) => i.currency),
-      ]),
-    ];
-    const fxMap = await buildFxMap(supabase, allCurrencies, baseCurrency);
-
-    // Acumular valor de inversiones por cuenta, convirtiendo cada inversión
-    // a base currency usando su propia moneda (no la de la cuenta)
-    const invByAccountBase = new Map<string, number>();
-    for (const inv of invRows ?? []) {
-      const fxRate = fxMap.get(inv.currency) ?? 1;
-      const valueBase = Number(inv.total_cost) * fxRate;
-      invByAccountBase.set(inv.account_id, (invByAccountBase.get(inv.account_id) ?? 0) + valueBase);
-    }
-
-    // 6. Calcular saldo de cierre por cuenta + inversiones
-    let total = 0;
-    const accountResults = (accounts ?? []).map((acc) => {
-      const ob = obByAccount.get(acc.id) ?? { opening: 0, opening_base: 0 };
-      const mov = movByAccount.get(acc.id) ?? { amount: 0, base_amount: 0 };
-
-      const balance = ob.opening + mov.amount;
-      const balanceBase = ob.opening_base + mov.base_amount;
-
-      // Inversiones ya convertidas a base currency per-inversión
-      const invValueBase = invByAccountBase.get(acc.id) ?? 0;
-
-      total += balanceBase + invValueBase;
-
-      const currencyRaw = acc.currencies;
-      const currency = Array.isArray(currencyRaw)
-        ? currencyRaw[0]
-        : currencyRaw;
-      const symbol =
-        (currency as { symbol?: string })?.symbol ?? acc.currency;
-
-      return {
-        id: acc.id,
-        name: acc.name,
-        account_type: acc.account_type,
-        currency: acc.currency,
-        currency_symbol: symbol,
-        balance,
-        balance_base: balanceBase,
-        investment_value: invValueBase,
-        investment_value_base: invValueBase,
-      };
+    const { data, error } = await supabase.rpc("account_net_worth_year", {
+      p_year: year,
+      p_base_currency: null,
     });
+
+    if (error) return { error: error.message };
+
+    const accountResults = ((data ?? []) as Array<{
+      month: number;
+      account_id: string;
+      account_name: string;
+      account_type: string;
+      currency: string;
+      currency_symbol: string;
+      balance: number | string;
+      balance_base: number | string;
+      investment_value: number | string;
+      investment_value_base: number | string;
+    }>).map((row) => ({
+      id: row.account_id,
+      name: row.account_name,
+      account_type: row.account_type,
+      currency: row.currency,
+      currency_symbol: row.currency_symbol,
+      balance: Number(row.balance ?? 0),
+      balance_base: Number(row.balance_base ?? 0),
+      investment_value: Number(row.investment_value ?? 0),
+      investment_value_base: Number(row.investment_value_base ?? 0),
+    }));
+
+    const total = accountResults.reduce(
+      (sum, account) => sum + account.balance_base + account.investment_value_base,
+      0,
+    );
 
     return {
       data: {
         year,
-        month: latestMonth.month,
+        month:
+          data && data.length > 0
+            ? Number((data[0] as { month: number | string }).month ?? 0)
+            : 0,
         total,
         accounts: accountResults,
       },
@@ -691,85 +574,34 @@ export async function getLiabilitiesForYear(
     if (!userId) return { error: "No autenticado" };
 
     const supabase = await createClient();
-
-    const { data: items, error: itemsError } = await supabase
-      .from("nw_items")
-      .select("id, name, currency, currencies ( symbol )")
-      .eq("user_id", userId)
-      .eq("side", "liability")
-      .order("name");
-
-    if (itemsError) return { error: itemsError.message };
-
-    const itemIds = (items ?? []).map((i) => i.id);
-    if (itemIds.length === 0) {
-      return { data: { year, total: 0, items: [] } };
-    }
-
-    const { data: snaps, error: snapError } = await supabase
-      .from("nw_snapshots")
-      .select("nw_item_id, month, amount, amount_base")
-      .in("nw_item_id", itemIds)
-      .eq("year", year)
-      .order("month", { ascending: false });
-
-    if (snapError) return { error: snapError.message };
-
-    // Último snapshot por ítem
-    const latestByItem = new Map<
-      string,
-      { amount: number; amount_base: number | null }
-    >();
-    for (const s of snaps ?? []) {
-      if (!latestByItem.has(s.nw_item_id)) {
-        latestByItem.set(s.nw_item_id, {
-          amount: Number(s.amount),
-          amount_base: s.amount_base != null ? Number(s.amount_base) : null,
-        });
-      }
-    }
-
-    // Fetch base currency
-    const { data: userPrefLiab } = await supabase
-      .from("user_preferences")
-      .select("base_currency")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const baseCurrencyLiab = (userPrefLiab as { base_currency?: string })?.base_currency ?? "EUR";
-
-    const itemCurrenciesLiab = [...new Set((items ?? []).map((i) => i.currency as string))];
-    const fxMapLiab = await buildFxMap(supabase, itemCurrenciesLiab, baseCurrencyLiab);
-
-    let total = 0;
-    const summaryItems = (items ?? []).map((item) => {
-      const snap = latestByItem.get(item.id);
-      const amount = snap?.amount ?? 0;
-      let amountBase = snap?.amount_base ?? null;
-
-      // Always recalculate amount_base for non-base currencies using live FX rate
-      if (amount !== 0 && item.currency !== baseCurrencyLiab) {
-        const rate = fxMapLiab.get(item.currency as string) ?? 1;
-        amountBase = amount * rate;
-      }
-
-      const currencyRaw = item.currencies;
-      const currency = Array.isArray(currencyRaw)
-        ? currencyRaw[0]
-        : currencyRaw;
-      const symbol =
-        (currency as { symbol?: string })?.symbol ?? item.currency;
-
-      total += amountBase ?? amount;
-
-      return {
-        item_id: item.id,
-        name: item.name,
-        currency: item.currency,
-        currency_symbol: symbol,
-        amount,
-        amount_base: amountBase,
-      };
+    const { data, error } = await supabase.rpc("liabilities_year", {
+      p_year: year,
+      p_base_currency: null,
     });
+
+    if (error) return { error: error.message };
+
+    const summaryItems = ((data ?? []) as Array<{
+      item_id: string;
+      name: string;
+      currency: string;
+      currency_symbol: string;
+      amount: number | string;
+      amount_base: number | string | null;
+    }>).map((item) => ({
+      item_id: item.item_id,
+      name: item.name,
+      currency: item.currency,
+      currency_symbol: item.currency_symbol,
+      amount: Number(item.amount ?? 0),
+      amount_base:
+        item.amount_base != null ? Number(item.amount_base) : null,
+    }));
+
+    const total = summaryItems.reduce(
+      (sum, item) => sum + (item.amount_base ?? item.amount),
+      0,
+    );
 
     return { data: { year, total, items: summaryItems } };
   } catch {
@@ -789,176 +621,26 @@ export async function getNetWorthEvolution(
     if (!userId) return { error: "No autenticado" };
 
     const supabase = await createClient();
+    const { data, error } = await supabase.rpc("net_worth_evolution_year", {
+      p_year: year,
+      p_base_currency: null,
+    });
 
-    // 1. Obtener todos los meses del año
-    const { data: monthRows, error: monthsError } = await supabase
-      .from("months")
-      .select("id, month")
-      .eq("user_id", userId)
-      .eq("year", year)
-      .order("month");
+    if (error) return { error: error.message };
 
-    if (monthsError) return { error: monthsError.message };
-    if (!monthRows || monthRows.length === 0) return { data: [] };
-
-    const monthIds = monthRows.map((m) => m.id);
-
-    // 2. Fetch accounts, liabilities and their snapshots in parallel
-    const [accountsRes, liabilityItemsRes] = await Promise.all([
-      supabase
-        .from("accounts")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("is_active", true),
-      supabase
-        .from("nw_items")
-        .select("id, currency")
-        .eq("user_id", userId)
-        .eq("side", "liability"),
-    ]);
-
-    const accountIds = (accountsRes.data ?? []).map((a) => a.id);
-    const liabilityIds = (liabilityItemsRes.data ?? []).map((i) => i.id);
-
-    // 3. Batch fetch ALL openings + transactions + liability snapshots + investments for the year
-    const [allOpeningsRes, allTxRes, liabilitySnapsRes, investmentsRes, userPrefRes] = await Promise.all([
-      accountIds.length > 0
-        ? supabase
-            .from("opening_balances")
-            .select("month_id, account_id, opening_base_amount")
-            .in("month_id", monthIds)
-        : Promise.resolve({ data: [] as { month_id: string; account_id: string; opening_base_amount: number }[] }),
-      accountIds.length > 0
-        ? supabase
-            .from("transactions")
-            .select("month_id, transaction_amounts ( account_id, base_amount )")
-            .in("month_id", monthIds)
-            .eq("user_id", userId)
-            .is("deleted_at", null)
-        : Promise.resolve({ data: [] as any[] }),
-      liabilityIds.length > 0
-        ? supabase
-            .from("nw_snapshots")
-            .select("nw_item_id, month, amount, amount_base")
-            .in("nw_item_id", liabilityIds)
-            .eq("year", year)
-            .order("month")
-        : Promise.resolve({ data: [] as any[] }),
-      supabase
-        .from("investments")
-        .select("total_cost, currency, purchase_date")
-        .eq("user_id", userId),
-      supabase
-        .from("user_preferences")
-        .select("base_currency")
-        .eq("user_id", userId)
-        .maybeSingle(),
-    ]);
-
-    const baseCurrency = (userPrefRes.data as any)?.base_currency ?? "EUR";
-
-    // 3b. Get FX rates for investment + liability currencies
-    const allEvolutionCurrencies = [
-      ...new Set([
-        ...((investmentsRes.data ?? []) as any[]).map((i: any) => i.currency as string),
-        ...(liabilityItemsRes.data ?? []).map((i: any) => i.currency as string).filter(Boolean),
-      ]),
-    ];
-    const fxMap = await buildFxMap(supabase, allEvolutionCurrencies, baseCurrency);
-
-    // 3c. Group investments by month (purchases up to each month of the year)
-    const invByMonth = new Map<number, number>();
-    for (const inv of (investmentsRes.data ?? []) as any[]) {
-      const purchaseDate = new Date(inv.purchase_date);
-      const invYear = purchaseDate.getFullYear();
-      const invMonth = purchaseDate.getMonth() + 1;
-      const fxRate = fxMap.get(inv.currency as string) ?? 1;
-      const valueBase = Number(inv.total_cost) * fxRate;
-
-      // If investment was purchased this year, it applies from its purchase month onward
-      // If purchased before this year, it applies to all months
-      for (const m of monthRows) {
-        if (invYear < year || (invYear === year && invMonth <= m.month)) {
-          invByMonth.set(m.month, (invByMonth.get(m.month) ?? 0) + valueBase);
-        }
-      }
-    }
-
-    // 4. Group openings by month_id
-    const openingsByMonth = new Map<string, number>();
-    for (const ob of (allOpeningsRes.data ?? []) as any[]) {
-      const key = ob.month_id as string;
-      openingsByMonth.set(key, (openingsByMonth.get(key) ?? 0) + Number(ob.opening_base_amount));
-    }
-
-    // 5. Group transaction base_amounts by month_id
-    const txByMonth = new Map<string, number>();
-    for (const tx of (allTxRes.data ?? []) as any[]) {
-      const monthId = tx.month_id as string;
-      const lines = Array.isArray(tx.transaction_amounts)
-        ? tx.transaction_amounts
-        : tx.transaction_amounts
-          ? [tx.transaction_amounts]
-          : [];
-      for (const line of lines) {
-        txByMonth.set(monthId, (txByMonth.get(monthId) ?? 0) + Number(line.base_amount));
-      }
-    }
-
-    // 6. Pre-process liability snapshots into Map<itemId, Map<month, value>>
-    const liabCurrencyMap = new Map<string, string>();
-    for (const i of (liabilityItemsRes.data ?? []) as any[]) {
-      liabCurrencyMap.set(i.id as string, i.currency as string);
-    }
-
-    const liabilitySnapsByItem = new Map<string, { month: number; value: number }[]>();
-    for (const s of (liabilitySnapsRes.data ?? []) as any[]) {
-      const itemId = s.nw_item_id as string;
-      // Always recalculate using live FX rate for non-base currencies
-      const itemCurrency = liabCurrencyMap.get(itemId);
-      let value: number;
-      if (itemCurrency && itemCurrency !== baseCurrency) {
-        const rate = fxMap.get(itemCurrency) ?? 1;
-        value = Number(s.amount) * rate;
-      } else {
-        value = Number(s.amount_base ?? s.amount);
-      }
-      if (!liabilitySnapsByItem.has(itemId)) {
-        liabilitySnapsByItem.set(itemId, []);
-      }
-      liabilitySnapsByItem.get(itemId)!.push({ month: s.month, value });
-    }
-
-    // 7. Calculate points for each month (no DB calls in loop)
-    const points: NetWorthEvolutionPoint[] = [];
-
-    for (const m of monthRows) {
-      const cashAssets = (openingsByMonth.get(m.id) ?? 0) + (txByMonth.get(m.id) ?? 0);
-      const investmentAssets = invByMonth.get(m.month) ?? 0;
-      const assets = cashAssets + investmentAssets;
-
-      let liabilities = 0;
-      for (const itemId of liabilityIds) {
-        const snaps = liabilitySnapsByItem.get(itemId);
-        if (!snaps) continue;
-        // snaps are sorted by month asc, find last one <= m.month
-        let latest: { month: number; value: number } | undefined;
-        for (const snap of snaps) {
-          if (snap.month <= m.month) latest = snap;
-          else break;
-        }
-        if (latest) liabilities += latest.value;
-      }
-
-      points.push({
-        month: m.month,
-        assets,
-        liabilities,
-        netWorth: assets - liabilities,
-      });
-    }
-
-    return { data: points };
+    return {
+      data: ((data ?? []) as Array<{
+        month: number | string;
+        assets: number | string;
+        liabilities: number | string;
+        net_worth: number | string;
+      }>).map((row) => ({
+        month: Number(row.month ?? 0),
+        assets: Number(row.assets ?? 0),
+        liabilities: Number(row.liabilities ?? 0),
+        netWorth: Number(row.net_worth ?? 0),
+      })),
+    };
   } catch {
     return { error: "Error al calcular evolución de patrimonio" };
   }

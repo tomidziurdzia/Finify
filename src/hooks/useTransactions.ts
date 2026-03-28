@@ -1,8 +1,15 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  useInfiniteQuery,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import {
   getTransactions,
+  getTransactionsPage,
   getTransactionsForRange,
   getBaseCurrency,
   getUsageCounts,
@@ -13,36 +20,68 @@ import {
   restoreTransaction,
 } from "@/actions/transactions";
 import type { CreateTransactionInput, CreateTransferInput, UpdateTransactionInput } from "@/lib/validations/transaction.schema";
+import type { TransactionFeedFilters } from "@/types/transactions";
 import { toast } from "sonner";
 
-const TRANSACTION_KEYS = {
+export const TRANSACTION_KEYS = {
   all: ["transactions"] as const,
-  list: (monthId: string) => ["transactions", monthId] as const,
+  list: (monthId: string) => ["transactions", "month", monthId] as const,
+  feed: (monthId: string, filters: TransactionFeedFilters) =>
+    ["transactions", "month", monthId, "feed", filters] as const,
   range: (start: string, end: string) =>
     ["transactions", "range", start, end] as const,
+  usageCounts: ["transactions", "usage-counts"] as const,
+  baseCurrency: ["preferences", "base-currency"] as const,
 };
+
+async function invalidateFinancialQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all }),
+    queryClient.invalidateQueries({ queryKey: ["months"] }),
+    queryClient.invalidateQueries({ queryKey: ["opening-balances"] }),
+    queryClient.invalidateQueries({ queryKey: ["budget", "summary"] }),
+    queryClient.invalidateQueries({ queryKey: ["budget", "summary-range"] }),
+    queryClient.invalidateQueries({ queryKey: ["net-worth"] }),
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+  ]);
+}
 
 export function useBaseCurrency() {
   return useQuery({
-    queryKey: ["baseCurrency"],
+    queryKey: TRANSACTION_KEYS.baseCurrency,
     queryFn: async () => {
       const result = await getBaseCurrency();
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
     staleTime: Infinity,
+    gcTime: Infinity,
+  });
+}
+
+export function useSuspenseBaseCurrency() {
+  return useSuspenseQuery({
+    queryKey: TRANSACTION_KEYS.baseCurrency,
+    queryFn: async () => {
+      const result = await getBaseCurrency();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: Infinity,
+    gcTime: Infinity,
   });
 }
 
 export function useUsageCounts() {
   return useQuery({
-    queryKey: ["usage-counts"],
+    queryKey: TRANSACTION_KEYS.usageCounts,
     queryFn: async () => {
       const result = await getUsageCounts();
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
     staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
   });
 }
 
@@ -57,6 +96,36 @@ export function useTransactions(monthId: string | null) {
       return result.data;
     },
     staleTime: 30_000,
+    gcTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useInfiniteTransactions(
+  monthId: string | null,
+  filters: TransactionFeedFilters,
+  limit = 50,
+) {
+  return useInfiniteQuery({
+    queryKey: TRANSACTION_KEYS.feed(monthId ?? "", filters),
+    enabled: !!monthId,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      if (!monthId) {
+        return { items: [], nextOffset: null };
+      }
+      const result = await getTransactionsPage({
+        monthId,
+        limit,
+        offset: pageParam,
+        ...filters,
+      });
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    getNextPageParam: (lastPage) => lastPage.nextOffset,
+    staleTime: 30_000,
+    gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,
   });
 }
@@ -75,6 +144,7 @@ export function useTransactionsForRange(
       return result.data;
     },
     staleTime: 30_000,
+    gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,
   });
 }
@@ -96,8 +166,8 @@ export function useCreateTransaction() {
     onSuccess: () => {
       toast.success("Transacción creada correctamente");
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
+    onSettled: async () => {
+      await invalidateFinancialQueries(queryClient);
     },
   });
 }
@@ -119,8 +189,8 @@ export function useCreateTransfer() {
     onSuccess: () => {
       toast.success("Transferencia creada correctamente");
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
+    onSettled: async () => {
+      await invalidateFinancialQueries(queryClient);
     },
   });
 }
@@ -142,8 +212,8 @@ export function useUpdateTransaction() {
     onSuccess: () => {
       toast.success("Transacción actualizada correctamente");
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
+    onSettled: async () => {
+      await invalidateFinancialQueries(queryClient);
     },
   });
 }
@@ -157,10 +227,28 @@ export function useDeleteTransaction() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    onMutate: async () => {
+    onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: TRANSACTION_KEYS.all });
+      const snapshots = queryClient.getQueriesData({
+        queryKey: TRANSACTION_KEYS.all,
+      });
+
+      for (const [key, value] of snapshots) {
+        if (!Array.isArray(value)) continue;
+        queryClient.setQueryData(
+          key,
+          value.filter((tx) =>
+            typeof tx === "object" && tx !== null && "id" in tx ? tx.id !== id : true,
+          ),
+        );
+      }
+
+      return { snapshots };
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _id, context) => {
+      for (const [key, value] of context?.snapshots ?? []) {
+        queryClient.setQueryData(key, value);
+      }
       toast.error(error.message);
     },
     onSuccess: (_, deletedId) => {
@@ -172,8 +260,8 @@ export function useDeleteTransaction() {
         duration: 8000,
       });
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
+    onSettled: async () => {
+      await invalidateFinancialQueries(queryClient);
     },
   });
 }
@@ -195,8 +283,8 @@ export function useRestoreTransaction() {
     onSuccess: () => {
       toast.success("Transacción restaurada");
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
+    onSettled: async () => {
+      await invalidateFinancialQueries(queryClient);
     },
   });
 }

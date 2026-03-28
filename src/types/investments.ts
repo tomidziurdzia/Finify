@@ -57,3 +57,13 @@ export interface PortfolioSummary {
   total_gain_loss_pct: number | null;
   holdings: HoldingPosition[];
 }
+
+export interface TransferableHolding {
+  source_account_id: string;
+  asset_name: string;
+  ticker: string | null;
+  asset_type: AssetType;
+  currency: string;
+  total_quantity: number;
+  account_name: string;
+}

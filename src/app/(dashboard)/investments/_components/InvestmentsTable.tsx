@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import React, { useCallback, useMemo, useState } from "react";
+import { Plus, Pencil, Trash2, RefreshCw, ChevronDown, ChevronRight, ArrowLeftRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -38,15 +38,10 @@ import { formatAmount, amountTone } from "@/lib/format";
 import { ASSET_TYPE_LABELS } from "@/types/investments";
 import type { InvestmentWithAccount, HoldingPosition } from "@/types/investments";
 import { InvestmentDialog } from "./InvestmentDialog";
+import { TransferPositionDialog } from "./TransferPositionDialog";
 
 export function InvestmentsTable() {
-  const {
-    data: investments,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useInvestments();
+  const { data: investments, isLoading, isError, error, refetch } = useInvestments();
   const deleteMutation = useDeleteInvestment();
   const { data: baseCurrency } = useBaseCurrency();
   const { data: currencies } = useCurrencies();
@@ -155,25 +150,27 @@ export function InvestmentsTable() {
   const [deletingInvestment, setDeletingInvestment] =
     useState<InvestmentWithAccount | null>(null);
   const [expandedHoldings, setExpandedHoldings] = useState<Set<string>>(new Set());
+  const [transferHolding, setTransferHolding] = useState<HoldingPosition | null>(null);
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
 
-  const toggleExpanded = (key: string) => {
+  const toggleExpanded = useCallback((key: string) => {
     setExpandedHoldings((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  };
+  }, []);
 
-  const handleCreate = () => {
+  const handleCreate = useCallback(() => {
     setEditingInvestment(null);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const handleEdit = (inv: InvestmentWithAccount) => {
+  const handleEdit = useCallback((inv: InvestmentWithAccount) => {
     setEditingInvestment(inv);
     setDialogOpen(true);
-  };
+  }, []);
 
   const handleDelete = async () => {
     if (!deletingInvestment) return;
@@ -198,16 +195,9 @@ export function InvestmentsTable() {
   if (isError && error) {
     return (
       <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-center">
-        <p className="text-destructive font-medium">
-          Error al cargar inversiones
-        </p>
+        <p className="text-destructive font-medium">Error al cargar inversiones</p>
         <p className="text-muted-foreground mt-1 text-sm">{error.message}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-3"
-          onClick={() => refetch()}
-        >
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
           Reintentar
         </Button>
       </div>
@@ -228,65 +218,34 @@ export function InvestmentsTable() {
           />
           Actualizar precios
         </Button>
-        <Button onClick={handleCreate} size="sm">
-          <Plus className="mr-1 size-4" />
-          Nueva inversión
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setTransferHolding(null);
+              setTransferDialogOpen(true);
+            }}
+            disabled={holdings.length === 0}
+          >
+            <ArrowLeftRight className="mr-1 size-4" />
+            Transferir posición
+          </Button>
+          <Button onClick={handleCreate} size="sm">
+            <Plus className="mr-1 size-4" />
+            Nueva inversión
+          </Button>
+        </div>
       </div>
 
-      {/* Summary Cards */}
-      {holdings.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className="gap-0 py-0">
-            <CardHeader className="px-4 pt-4 pb-2">
-              <CardDescription>Total Invertido</CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-2xl font-bold">
-                {currencySymbol} {formatAmount(totalInvested)}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="gap-0 py-0">
-            <CardHeader className="px-4 pt-4 pb-2">
-              <CardDescription>Valor Actual</CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-2xl font-bold">
-                {totalCurrentValue !== null
-                  ? `${currencySymbol} ${formatAmount(totalCurrentValue)}`
-                  : "—"}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="gap-0 py-0">
-            <CardHeader className="px-4 pt-4 pb-2">
-              <CardDescription>Ganancia / Pérdida</CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              {totalGainLoss !== null ? (
-                <div className="flex items-baseline gap-2">
-                  <p
-                    className={`text-2xl font-bold ${amountTone(totalGainLoss)}`}
-                  >
-                    {currencySymbol} {formatAmount(totalGainLoss)}
-                  </p>
-                  <span
-                    className={`text-sm font-medium ${amountTone(totalGainLoss)}`}
-                  >
-                    ({totalGainLossPct !== null ? formatAmount(totalGainLossPct) : "—"}
-                    %)
-                  </span>
-                </div>
-              ) : (
-                <p className="text-2xl font-bold text-muted-foreground">—</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <InvestmentsSummaryCards
+        holdingsCount={holdings.length}
+        currencySymbol={currencySymbol}
+        totalInvested={totalInvested}
+        totalCurrentValue={totalCurrentValue}
+        totalGainLoss={totalGainLoss}
+        totalGainLossPct={totalGainLossPct}
+      />
 
       {/* Holdings Table */}
       <div className="rounded-md border">
@@ -330,165 +289,42 @@ export function InvestmentsTable() {
                 </TableCell>
               </TableRow>
             ) : (
-              holdings.map((holding) => {
-                const holdingKey = `${holding.ticker}::${holding.account_id}`;
-                const singleInv =
-                  holding.investments.length === 1
-                    ? (holding.investments[0] as InvestmentWithAccount)
-                    : null;
-                const isMulti = !singleInv;
-                const isExpanded = expandedHoldings.has(holdingKey);
-
-                return (
-                  <React.Fragment key={holdingKey}>
-                    <TableRow
-                      className={isMulti ? "cursor-pointer" : undefined}
-                      onClick={isMulti ? () => toggleExpanded(holdingKey) : undefined}
-                    >
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-1">
-                          {isMulti && (
-                            isExpanded
-                              ? <ChevronDown className="size-4 text-muted-foreground" />
-                              : <ChevronRight className="size-4 text-muted-foreground" />
-                          )}
-                          {holding.asset_name}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {holding.ticker && (
-                          <Badge variant="secondary">{holding.ticker}</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        {ASSET_TYPE_LABELS[holding.asset_type]}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {holding.account_name}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatAmount(holding.total_quantity)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {holding.currency_symbol}{" "}
-                        {formatAmount(holding.avg_cost_per_unit)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {holding.currency_symbol}{" "}
-                        {formatAmount(holding.total_cost)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {holding.current_price !== null
-                          ? `${holding.currency_symbol} ${formatAmount(holding.current_price)}`
-                          : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {holding.current_value !== null
-                          ? `${holding.currency_symbol} ${formatAmount(holding.current_value)}`
-                          : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {holding.gain_loss !== null ? (
-                          <div>
-                            <span
-                              className={`text-sm font-medium ${amountTone(holding.gain_loss)}`}
-                            >
-                              {formatAmount(holding.gain_loss)}
-                            </span>
-                            {holding.gain_loss_pct !== null && (
-                              <span
-                                className={`ml-1 text-xs ${amountTone(holding.gain_loss)}`}
-                              >
-                                ({formatAmount(holding.gain_loss_pct)}%)
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {singleInv ? (
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label="Editar inversión"
-                              onClick={() => handleEdit(singleInv)}
-                            >
-                              <Pencil className="size-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label="Eliminar inversión"
-                              onClick={() => setDeletingInvestment(singleInv)}
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {holding.investments.length} compras
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                    {isMulti && isExpanded && (holding.investments as InvestmentWithAccount[]).map((inv) => (
-                      <TableRow key={inv.id} className="bg-muted/30">
-                        <TableCell className="pl-10 text-xs text-muted-foreground">
-                          {inv.purchase_date}
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right text-xs">
-                          {formatAmount(inv.quantity)}
-                        </TableCell>
-                        <TableCell className="text-right text-xs">
-                          {inv.currency_symbol} {formatAmount(inv.price_per_unit)}
-                        </TableCell>
-                        <TableCell className="text-right text-xs">
-                          {inv.currency_symbol} {formatAmount(inv.total_cost)}
-                        </TableCell>
-                        <TableCell />
-                        <TableCell />
-                        <TableCell />
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() => handleEdit(inv)}
-                            >
-                              <Pencil className="size-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() => setDeletingInvestment(inv)}
-                            >
-                              <Trash2 className="size-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </React.Fragment>
-                );
-              })
+              holdings.map((holding) => (
+                <HoldingRows
+                  key={`${holding.ticker}::${holding.account_id}`}
+                  holding={holding}
+                  isExpanded={expandedHoldings.has(`${holding.ticker}::${holding.account_id}`)}
+                  onToggleExpanded={toggleExpanded}
+                  onTransfer={(selectedHolding) => {
+                    setTransferHolding(selectedHolding);
+                    setTransferDialogOpen(true);
+                  }}
+                  onEdit={handleEdit}
+                  onDelete={setDeletingInvestment}
+                />
+              ))
             )}
           </TableBody>
         </Table>
       </div>
 
       {/* Create/Edit Dialog */}
-      <InvestmentDialog
-        investment={editingInvestment}
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
+      {(dialogOpen || editingInvestment) && (
+        <InvestmentDialog
+          investment={editingInvestment}
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+        />
+      )}
+
+      <TransferPositionDialog
+        holdings={holdings}
+        holding={transferHolding}
+        open={transferDialogOpen}
+        onOpenChange={(open) => {
+          setTransferDialogOpen(open);
+          if (!open) setTransferHolding(null);
+        }}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -528,3 +364,201 @@ export function InvestmentsTable() {
     </>
   );
 }
+
+const InvestmentsSummaryCards = React.memo(function InvestmentsSummaryCards({
+  holdingsCount,
+  currencySymbol,
+  totalInvested,
+  totalCurrentValue,
+  totalGainLoss,
+  totalGainLossPct,
+}: {
+  holdingsCount: number;
+  currencySymbol: string;
+  totalInvested: number;
+  totalCurrentValue: number | null;
+  totalGainLoss: number | null;
+  totalGainLossPct: number | null;
+}) {
+  if (holdingsCount === 0) return null;
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <Card className="gap-0 py-0">
+        <CardHeader className="px-4 pt-4 pb-2">
+          <CardDescription>Total Invertido</CardDescription>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <p className="text-2xl font-bold">
+            {currencySymbol} {formatAmount(totalInvested)}
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="gap-0 py-0">
+        <CardHeader className="px-4 pt-4 pb-2">
+          <CardDescription>Valor Actual</CardDescription>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <p className="text-2xl font-bold">
+            {totalCurrentValue !== null
+              ? `${currencySymbol} ${formatAmount(totalCurrentValue)}`
+              : "—"}
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="gap-0 py-0">
+        <CardHeader className="px-4 pt-4 pb-2">
+          <CardDescription>Ganancia / Pérdida</CardDescription>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          {totalGainLoss !== null ? (
+            <div className="flex items-baseline gap-2">
+              <p className={`text-2xl font-bold ${amountTone(totalGainLoss)}`}>
+                {currencySymbol} {formatAmount(totalGainLoss)}
+              </p>
+              <span className={`text-sm font-medium ${amountTone(totalGainLoss)}`}>
+                ({totalGainLossPct !== null ? formatAmount(totalGainLossPct) : "—"}%)
+              </span>
+            </div>
+          ) : (
+            <p className="text-2xl font-bold text-muted-foreground">—</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
+
+const HoldingRows = React.memo(function HoldingRows({
+  holding,
+  isExpanded,
+  onToggleExpanded,
+  onTransfer,
+  onEdit,
+  onDelete,
+}: {
+  holding: HoldingPosition;
+  isExpanded: boolean;
+  onToggleExpanded: (key: string) => void;
+  onTransfer: (holding: HoldingPosition) => void;
+  onEdit: (investment: InvestmentWithAccount) => void;
+  onDelete: (investment: InvestmentWithAccount) => void;
+}) {
+  const holdingKey = `${holding.ticker}::${holding.account_id}`;
+  const singleInv =
+    holding.investments.length === 1
+      ? (holding.investments[0] as InvestmentWithAccount)
+      : null;
+  const isMulti = !singleInv;
+
+  return (
+    <React.Fragment>
+      <TableRow
+        className={isMulti ? "cursor-pointer" : undefined}
+        onClick={isMulti ? () => onToggleExpanded(holdingKey) : undefined}
+      >
+        <TableCell className="font-medium">
+          <div className="flex items-center gap-1">
+            {isMulti &&
+              (isExpanded ? (
+                <ChevronDown className="size-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-4 text-muted-foreground" />
+              ))}
+            {holding.asset_name}
+          </div>
+        </TableCell>
+        <TableCell>
+          {holding.ticker && <Badge variant="secondary">{holding.ticker}</Badge>}
+        </TableCell>
+        <TableCell className="text-xs">{ASSET_TYPE_LABELS[holding.asset_type]}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">{holding.account_name}</TableCell>
+        <TableCell className="text-right">{formatAmount(holding.total_quantity)}</TableCell>
+        <TableCell className="text-right">
+          {holding.currency_symbol} {formatAmount(holding.avg_cost_per_unit)}
+        </TableCell>
+        <TableCell className="text-right">
+          {holding.currency_symbol} {formatAmount(holding.total_cost)}
+        </TableCell>
+        <TableCell className="text-right">
+          {holding.current_price !== null
+            ? `${holding.currency_symbol} ${formatAmount(holding.current_price)}`
+            : "—"}
+        </TableCell>
+        <TableCell className="text-right">
+          {holding.current_value !== null
+            ? `${holding.currency_symbol} ${formatAmount(holding.current_value)}`
+            : "—"}
+        </TableCell>
+        <TableCell className="text-right">
+          {holding.gain_loss !== null ? (
+            <div>
+              <span className={`text-sm font-medium ${amountTone(holding.gain_loss)}`}>
+                {formatAmount(holding.gain_loss)}
+              </span>
+              {holding.gain_loss_pct !== null && (
+                <span className={`ml-1 text-xs ${amountTone(holding.gain_loss)}`}>
+                  ({formatAmount(holding.gain_loss_pct)}%)
+                </span>
+              )}
+            </div>
+          ) : (
+            "—"
+          )}
+        </TableCell>
+        <TableCell className="text-right">
+          {singleInv ? (
+            <div className="flex justify-end gap-1">
+              <Button variant="ghost" size="icon" aria-label="Transferir posicion" onClick={() => onTransfer(holding)}>
+                <ArrowLeftRight className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" aria-label="Editar inversión" onClick={() => onEdit(singleInv)}>
+                <Pencil className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" aria-label="Eliminar inversión" onClick={() => onDelete(singleInv)}>
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">{holding.investments.length} compras</span>
+          )}
+        </TableCell>
+      </TableRow>
+      {isMulti &&
+        isExpanded &&
+        (holding.investments as InvestmentWithAccount[]).map((inv) => (
+          <TableRow key={inv.id} className="bg-muted/30">
+            <TableCell className="pl-10 text-xs text-muted-foreground">{inv.purchase_date}</TableCell>
+            <TableCell />
+            <TableCell />
+            <TableCell />
+            <TableCell className="text-right text-xs">{formatAmount(inv.quantity)}</TableCell>
+            <TableCell className="text-right text-xs">
+              {inv.currency_symbol} {formatAmount(inv.price_per_unit)}
+            </TableCell>
+            <TableCell className="text-right text-xs">
+              {inv.currency_symbol} {formatAmount(inv.total_cost)}
+            </TableCell>
+            <TableCell />
+            <TableCell />
+            <TableCell />
+            <TableCell className="text-right">
+              <div className="flex justify-end gap-1">
+                <Button variant="ghost" size="icon" className="size-7" onClick={() => onTransfer(holding)}>
+                  <ArrowLeftRight className="size-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="size-7" onClick={() => onEdit(inv)}>
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="size-7" onClick={() => onDelete(inv)}>
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+    </React.Fragment>
+  );
+});
