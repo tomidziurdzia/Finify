@@ -55,16 +55,20 @@ export function InvestmentsTable() {
   // Get unique tickers for price fetching
   const tickersForPricing = useMemo(() => {
     if (!investments) return [];
-    const unique = new Map<string, string>();
+    const unique = new Map<
+      string,
+      { key: string; ticker?: string | null; isin?: string | null; assetType: string }
+    >();
     for (const inv of investments) {
-      if (inv.ticker) {
-        unique.set(inv.ticker, inv.asset_type);
-      }
+      const key = inv.ticker?.trim() || inv.isin?.trim() || inv.asset_name.trim();
+      unique.set(key, {
+        key,
+        ticker: inv.ticker,
+        isin: inv.isin,
+        assetType: inv.asset_type,
+      });
     }
-    return Array.from(unique.entries()).map(([ticker, assetType]) => ({
-      ticker,
-      assetType,
-    }));
+    return Array.from(unique.values());
   }, [investments]);
 
   const {
@@ -93,7 +97,8 @@ export function InvestmentsTable() {
       const totalCost = group.reduce((s, i) => s + i.total_cost, 0);
       const avgCost = totalQty > 0 ? totalCost / totalQty : 0;
       const ticker = first.ticker ?? first.asset_name;
-      const currentPrice = prices?.[ticker] ?? null;
+      const priceKey = first.ticker?.trim() || first.isin?.trim() || first.asset_name.trim();
+      const currentPrice = prices?.[priceKey] ?? null;
       const currentValue =
         currentPrice !== null ? totalQty * currentPrice : null;
       const gainLoss =
@@ -105,6 +110,7 @@ export function InvestmentsTable() {
 
       return {
         ticker,
+        isin: first.isin ?? null,
         asset_name: first.asset_name,
         asset_type: first.asset_type,
         account_id: first.account_id,

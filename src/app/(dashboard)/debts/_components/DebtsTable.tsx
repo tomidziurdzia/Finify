@@ -20,10 +20,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useDebts, useDeleteNwItem, useLiabilitiesForYear } from "@/hooks/useNetWorth";
+import {
+  useDebts,
+  useDeleteNwItem,
+  useNwMonthSummary,
+} from "@/hooks/useNetWorth";
 import { useMonths } from "@/hooks/useMonths";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, MONTH_NAMES } from "@/lib/format";
 import type { NwItemWithRelations } from "@/types/net-worth";
 import { DebtDialog } from "./DebtDialog";
 
@@ -31,6 +42,7 @@ export function DebtsTable() {
   const { data: debts, isLoading, isError, error, refetch } = useDebts();
   const deleteMutation = useDeleteNwItem();
   const { data: months } = useMonths();
+  const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
 
   const currentYear = useMemo(() => {
     if (!months || months.length === 0) return new Date().getFullYear();
@@ -38,18 +50,40 @@ export function DebtsTable() {
     return Math.max(...years);
   }, [months]);
 
-  const { data: liabilities } = useLiabilitiesForYear(currentYear);
+  const monthsForYear = useMemo(
+    () =>
+      (months ?? [])
+        .filter((month) => month.year === currentYear)
+        .sort((a, b) => b.month - a.month),
+    [currentYear, months],
+  );
 
-  // Map item_id → amount from liabilities summary
+  useEffect(() => {
+    if (!monthsForYear.length) return;
+    setSelectedMonthId((current) =>
+      current && monthsForYear.some((month) => month.id === current)
+        ? current
+        : monthsForYear[0].id,
+    );
+  }, [monthsForYear]);
+
+  const selectedMonth =
+    monthsForYear.find((month) => month.id === selectedMonthId) ?? monthsForYear[0] ?? null;
+
+  const { data: monthSummary } = useNwMonthSummary(
+    selectedMonth?.year ?? currentYear,
+    selectedMonth?.month ?? 1,
+  );
+
   const amountByItem = useMemo(() => {
     const map = new Map<string, number>();
-    if (liabilities) {
-      for (const item of liabilities.items) {
+    if (monthSummary) {
+      for (const item of monthSummary.items.filter((item) => item.side === "liability")) {
         map.set(item.item_id, item.amount);
       }
     }
     return map;
-  }, [liabilities]);
+  }, [monthSummary]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDebt, setEditingDebt] = useState<
@@ -104,10 +138,26 @@ export function DebtsTable() {
   return (
     <>
       <div className="flex justify-end">
-        <Button onClick={handleCreate} size="sm">
-          <Plus className="mr-1 size-4" />
-          Nueva deuda
-        </Button>
+        <div className="flex items-center gap-2">
+          {monthsForYear.length > 0 && (
+            <Select value={selectedMonthId ?? ""} onValueChange={setSelectedMonthId}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Mes" />
+              </SelectTrigger>
+              <SelectContent>
+                {monthsForYear.map((month) => (
+                  <SelectItem key={month.id} value={month.id}>
+                    {MONTH_NAMES[month.month - 1]} {month.year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Button onClick={handleCreate} size="sm">
+            <Plus className="mr-1 size-4" />
+            Nueva deuda
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-md border">
@@ -164,11 +214,18 @@ export function DebtsTable() {
         </Table>
       </div>
 
+      {selectedMonth && (
+        <p className="text-muted-foreground text-sm">
+          Estás viendo y editando el saldo de deuda al cierre de {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}.
+        </p>
+      )}
+
       <DebtDialog
         debt={editingDebt}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        year={currentYear}
+        year={selectedMonth?.year ?? currentYear}
+        month={selectedMonth?.month ?? 1}
       />
 
       <Dialog

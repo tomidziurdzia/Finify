@@ -41,6 +41,7 @@ interface DebtDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   year: number;
+  month: number;
 }
 
 type DebtFormValues = {
@@ -49,7 +50,7 @@ type DebtFormValues = {
   amount: string;
 };
 
-export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) {
+export function DebtDialog({ debt, open, onOpenChange, year, month }: DebtDialogProps) {
   const isEditing = !!debt;
 
   const form = useForm<DebtFormValues>({
@@ -102,12 +103,10 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
           name: values.name,
           currency: values.currency,
         });
-        const now = new Date();
-        const snapshotMonth = now.getFullYear() === year ? now.getMonth() + 1 : 12;
         await upsertSnapshot.mutateAsync({
           nw_item_id: debt.id,
           year,
-          month: snapshotMonth,
+          month,
           amount,
           amount_base: amountBase,
         });
@@ -118,12 +117,10 @@ export function DebtDialog({ debt, open, onOpenChange, year }: DebtDialogProps) 
           account_id: null,
           display_order: 0,
         });
-        const now = new Date();
-        const snapshotMonth = now.getFullYear() === year ? now.getMonth() + 1 : 12;
         await upsertSnapshot.mutateAsync({
           nw_item_id: result.id,
           year,
-          month: snapshotMonth,
+          month,
           amount,
           amount_base: amountBase,
         });

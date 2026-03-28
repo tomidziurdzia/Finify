@@ -12,6 +12,9 @@ import {
   updateInvestment,
   deleteInvestment,
   fetchCurrentPrices,
+  getCurrentInvestmentValuesByAccount,
+  getCurrentInvestmentValuesByMonth,
+  lookupInvestmentInstrument,
   transferInvestmentPosition,
 } from "@/actions/investments";
 import type {
@@ -24,6 +27,8 @@ import { toast } from "sonner";
 
 export const INVESTMENT_KEYS = {
   all: ["investments"] as const,
+  currentValuesByAccount: ["investments", "current-values-by-account"] as const,
+  currentValuesByMonth: (year: number) => ["investments", "current-values-by-month", year] as const,
   prices: (baseCurrency: string, tickersKey: string) =>
     ["investments", "prices", baseCurrency, tickersKey] as const,
 };
@@ -54,6 +59,46 @@ export function useSuspenseInvestments() {
   });
 }
 
+export function useCurrentInvestmentValuesByAccount() {
+  return useQuery({
+    queryKey: INVESTMENT_KEYS.currentValuesByAccount,
+    queryFn: async () => {
+      const result = await getCurrentInvestmentValuesByAccount();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+  });
+}
+
+export function useCurrentInvestmentValuesByMonth(year: number) {
+  return useQuery({
+    queryKey: INVESTMENT_KEYS.currentValuesByMonth(year),
+    enabled: year > 0,
+    queryFn: async () => {
+      const result = await getCurrentInvestmentValuesByMonth(year);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+  });
+}
+
+export function useLookupInvestmentInstrument() {
+  return useMutation({
+    mutationFn: async (input: { ticker?: string | null; isin?: string | null }) => {
+      const result = await lookupInvestmentInstrument(input);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+}
+
 export function useCreateInvestment() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -75,6 +120,7 @@ export function useCreateInvestment() {
           account_id: input.account_id,
           asset_name: input.asset_name,
           ticker: input.ticker ?? null,
+          isin: input.isin ?? null,
           asset_type: input.asset_type,
           quantity: input.quantity,
           price_per_unit: input.price_per_unit,
@@ -104,6 +150,8 @@ export function useCreateInvestment() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.currentValuesByAccount });
+      queryClient.invalidateQueries({ queryKey: ["investments", "current-values-by-month"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["net-worth"] });
     },
@@ -145,6 +193,8 @@ export function useUpdateInvestment() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.currentValuesByAccount });
+      queryClient.invalidateQueries({ queryKey: ["investments", "current-values-by-month"] });
       queryClient.invalidateQueries({ queryKey: ["net-worth"] });
     },
   });
@@ -180,6 +230,8 @@ export function useDeleteInvestment() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.currentValuesByAccount });
+      queryClient.invalidateQueries({ queryKey: ["investments", "current-values-by-month"] });
       queryClient.invalidateQueries({ queryKey: ["net-worth"] });
     },
   });
@@ -201,16 +253,18 @@ export function useTransferInvestmentPosition() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.currentValuesByAccount });
+      queryClient.invalidateQueries({ queryKey: ["investments", "current-values-by-month"] });
       queryClient.invalidateQueries({ queryKey: ["net-worth"] });
     },
   });
 }
 
 export function useCurrentPrices(
-  tickers: { ticker: string; assetType: string }[],
+  tickers: { key: string; ticker?: string | null; isin?: string | null; assetType: string }[],
   baseCurrency: string
 ) {
-  const tickerKeys = tickers.map((t) => t.ticker).sort();
+  const tickerKeys = tickers.map((t) => t.key).sort();
   const tickersKey = tickerKeys.join("|");
   return useQuery({
     queryKey: INVESTMENT_KEYS.prices(baseCurrency, tickersKey),

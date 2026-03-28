@@ -328,7 +328,15 @@ function BudgetMonthContent({
     for (const row of categoryRows) {
       nextDrafts[row.category.id] = formatAmount(row.planned);
     }
-    onSetDrafts(nextDrafts);
+    onSetDrafts((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(nextDrafts);
+      if (prevKeys.length === nextKeys.length) {
+        const isSame = nextKeys.every((key) => prev[key] === nextDrafts[key]);
+        if (isSame) return prev;
+      }
+      return nextDrafts;
+    });
   }, [categoryRows, onSetDrafts]);
 
   if (categoriesLoading || linesLoading || summaryLoading || !categories || !lines || !summary) {

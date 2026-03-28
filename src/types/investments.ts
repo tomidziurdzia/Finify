@@ -15,6 +15,7 @@ export interface Investment {
   account_id: string;
   asset_name: string;
   ticker: string | null;
+  isin: string | null;
   asset_type: AssetType;
   quantity: number;
   price_per_unit: number;
@@ -34,6 +35,7 @@ export interface InvestmentWithAccount extends Investment {
 
 export interface HoldingPosition {
   ticker: string;
+  isin: string | null;
   asset_name: string;
   asset_type: AssetType;
   account_id: string;

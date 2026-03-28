@@ -162,6 +162,12 @@ export function TransactionsTable() {
 
   const selectedMonth =
     sortedMonths.find((month) => month.id === selectedMonthId) ?? null;
+  const hasActiveFilters =
+    searchDraft.trim().length > 0 ||
+    transactionTypeFilter !== "all" ||
+    accountIdFilter !== "all" ||
+    categoryIdFilter !== "all" ||
+    categoryTypeFilter !== "all";
 
   const isClosedMonth =
     selectedMonthId != null &&
@@ -417,6 +423,15 @@ export function TransactionsTable() {
     setTransferDialogOpen(true);
   }, []);
 
+  const handleClearFilters = useCallback(() => {
+    setSearchDraft("");
+    setSearchTerm("");
+    setTransactionTypeFilter("all");
+    setAccountIdFilter("all");
+    setCategoryIdFilter("all");
+    setCategoryTypeFilter("all");
+  }, []);
+
   const handleEdit = useCallback((tx: TransactionWithRelations) => {
     if (tx.transaction_type === "transfer") {
       setEditingTransfer(tx);
@@ -598,6 +613,13 @@ export function TransactionsTable() {
             ))}
           </SelectContent>
         </Select>
+        <Button
+          variant="outline"
+          onClick={handleClearFilters}
+          disabled={!hasActiveFilters}
+        >
+          Limpiar filtros
+        </Button>
       </div>
 
       <div className="rounded-md border">
