@@ -138,6 +138,7 @@ export function TransferPositionDialog({
         destination_account_id: values.destination_account_id,
         asset_name: resolvedHolding.asset_name,
         ticker: resolvedHolding.ticker,
+        isin: resolvedHolding.isin,
         asset_type: resolvedHolding.asset_type,
         currency: resolvedHolding.currency,
         quantity,

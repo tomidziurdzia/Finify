@@ -30,6 +30,7 @@ import {
 import { useAccounts, useCurrencies } from "@/hooks/useAccounts";
 import {
   useCreateInvestment,
+  useLookupInvestmentInstrument,
   useUpdateInvestment,
 } from "@/hooks/useInvestments";
 import { AccountCombobox } from "@/components/account-combobox";
@@ -40,7 +41,7 @@ import {
 } from "@/types/investments";
 import type { InvestmentWithAccount } from "@/types/investments";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Search } from "lucide-react";
 
 interface InvestmentDialogProps {
   investment: InvestmentWithAccount | null;
@@ -52,6 +53,7 @@ type InvestmentFormValues = {
   account_id: string;
   asset_name: string;
   ticker: string;
+  isin: string;
   asset_type: string;
   quantity: string;
   price_per_unit: string;
@@ -74,6 +76,7 @@ export function InvestmentDialog({
       account_id: "",
       asset_name: "",
       ticker: "",
+      isin: "",
       asset_type: "stock",
       quantity: "",
       price_per_unit: "",
@@ -89,6 +92,7 @@ export function InvestmentDialog({
   const { data: currencies } = useCurrencies();
   const createMutation = useCreateInvestment();
   const updateMutation = useUpdateInvestment();
+  const lookupInstrumentMutation = useLookupInvestmentInstrument();
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
@@ -128,6 +132,7 @@ export function InvestmentDialog({
         account_id: investment.account_id,
         asset_name: investment.asset_name,
         ticker: investment.ticker ?? "",
+        isin: investment.isin ?? "",
         asset_type: investment.asset_type,
         quantity: numberToInputString(investment.quantity),
         price_per_unit: numberToInputString(investment.price_per_unit),
@@ -142,6 +147,7 @@ export function InvestmentDialog({
         account_id: investmentAccounts[0]?.id ?? "",
         asset_name: "",
         ticker: "",
+        isin: "",
         asset_type: "stock",
         quantity: "",
         price_per_unit: "",
@@ -189,6 +195,36 @@ export function InvestmentDialog({
     recalcTotal(form.getValues("quantity"), formatted);
   }, [form, recalcTotal]);
 
+  const handleLookupInstrument = useCallback(async () => {
+    const ticker = form.getValues("ticker").trim();
+    const isin = form.getValues("isin").trim();
+    if (!ticker && !isin) return;
+
+    try {
+      const result = await lookupInstrumentMutation.mutateAsync({
+        ticker: ticker || null,
+        isin: isin || null,
+      });
+
+      if (result.asset_name && !form.getValues("asset_name").trim()) {
+        form.setValue("asset_name", result.asset_name);
+      }
+      if (result.ticker && !ticker) {
+        form.setValue("ticker", result.ticker);
+      }
+      if (result.currency && !isCrypto) {
+        form.setValue("currency", result.currency);
+      }
+      if (result.price_per_unit != null && !form.getValues("price_per_unit").trim()) {
+        const priceString = numberToInputString(result.price_per_unit);
+        form.setValue("price_per_unit", priceString);
+        recalcTotal(form.getValues("quantity"), priceString);
+      }
+    } catch {
+      // toast handled in hook
+    }
+  }, [form, isCrypto, lookupInstrumentMutation, recalcTotal]);
+
   const onSubmit = async (values: InvestmentFormValues) => {
     const quantity = parseNumberInput(values.quantity);
     const pricePerUnit = parseNumberInput(values.price_per_unit);
@@ -214,6 +250,7 @@ export function InvestmentDialog({
           account_id: values.account_id,
           asset_name: values.asset_name,
           ticker: values.ticker || null,
+          isin: values.isin || null,
           asset_type: values.asset_type as InvestmentWithAccount["asset_type"],
           quantity,
           price_per_unit: pricePerUnit,
@@ -227,6 +264,7 @@ export function InvestmentDialog({
           account_id: values.account_id,
           asset_name: values.asset_name,
           ticker: values.ticker || null,
+          isin: values.isin || null,
           asset_type: values.asset_type as InvestmentWithAccount["asset_type"],
           quantity,
           price_per_unit: pricePerUnit,
@@ -282,7 +320,7 @@ export function InvestmentDialog({
               )}
             />
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <FormField
                 control={form.control}
                 name="asset_name"
@@ -308,11 +346,51 @@ export function InvestmentDialog({
                   <FormItem>
                     <FormLabel>Ticker</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder="Ej: VOO"
-                        disabled={isPending}
-                        {...field}
-                      />
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Ej: VOO"
+                          disabled={isPending}
+                          {...field}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={handleLookupInstrument}
+                          disabled={isPending || lookupInstrumentMutation.isPending}
+                        >
+                          <Search className="size-4" />
+                        </Button>
+                      </div>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="isin"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>ISIN</FormLabel>
+                    <FormControl>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Ej: IE00B3XXRP09"
+                          disabled={isPending}
+                          {...field}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={handleLookupInstrument}
+                          disabled={isPending || lookupInstrumentMutation.isPending}
+                        >
+                          <Search className="size-4" />
+                        </Button>
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

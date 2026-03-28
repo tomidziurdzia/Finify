@@ -18,6 +18,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Finify",
   description: "Personal finance tracker",
+  icons: {
+    icon: "/finify-icon.png",
+    shortcut: "/finify-icon.png",
+    apple: "/finify-icon.png",
+  },
 };
 
 export default function RootLayout({

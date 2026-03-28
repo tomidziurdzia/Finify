@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getOrFetchFxRate } from "@/actions/fx";
 import {
   CreateInvestmentSchema,
   TransferInvestmentPositionSchema,
@@ -12,6 +13,10 @@ import type {
   AssetType,
 } from "@/types/investments";
 import { fetchCryptoPrices } from "@/lib/coingecko";
+import {
+  fetchTwelveDataInstrument,
+  fetchTwelveDataPrices,
+} from "@/lib/twelvedata";
 
 type ActionResult<T> = { data: T } | { error: string };
 
@@ -63,6 +68,7 @@ export async function getInvestments(): Promise<
         account_id: row.account_id,
         asset_name: row.asset_name,
         ticker: row.ticker,
+        isin: row.isin,
         asset_type: row.asset_type as AssetType,
         quantity: Number(row.quantity),
         price_per_unit: Number(row.price_per_unit),
@@ -121,6 +127,7 @@ export async function createInvestment(
         account_id: parsed.data.account_id,
         asset_name: parsed.data.asset_name,
         ticker: parsed.data.ticker ?? null,
+        isin: parsed.data.isin ?? null,
         asset_type: parsed.data.asset_type,
         quantity: parsed.data.quantity,
         price_per_unit: parsed.data.price_per_unit,
@@ -301,6 +308,253 @@ export async function deleteInvestment(
   }
 }
 
+export async function getCurrentInvestmentValuesByAccount(): Promise<
+  ActionResult<Record<string, number>>
+> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const baseCurrency = prefs?.base_currency ?? "USD";
+
+    const investmentsResult = await getInvestments();
+    if ("error" in investmentsResult) return investmentsResult;
+
+    const investments = investmentsResult.data;
+    if (investments.length === 0) return { data: {} };
+
+    const grouped = new Map<
+      string,
+      {
+        key: string;
+        price_key: string;
+        account_id: string;
+        asset_type: string;
+        currency: string;
+        ticker: string;
+        isin: string | null;
+        quantity: number;
+        total_cost: number;
+      }
+    >();
+
+    for (const investment of investments) {
+      const ticker = (investment.ticker ?? investment.asset_name).trim();
+      const key = `${investment.account_id}::${ticker}`;
+      const current = grouped.get(key) ?? {
+        key,
+        price_key: investment.ticker?.trim() || investment.isin?.trim() || investment.asset_name.trim(),
+        account_id: investment.account_id,
+        asset_type: investment.asset_type,
+        currency: investment.currency,
+        ticker,
+        isin: investment.isin,
+        quantity: 0,
+        total_cost: 0,
+      };
+      current.quantity += investment.quantity;
+      current.total_cost += investment.total_cost;
+      grouped.set(key, current);
+    }
+
+    const priceMapResult = await fetchCurrentPrices(
+      Array.from(
+        new Map(
+          Array.from(grouped.values()).map((holding) => [holding.price_key, {
+            key: holding.price_key,
+            ticker: holding.ticker,
+            isin: holding.isin,
+            assetType: holding.asset_type,
+          }]),
+        ).values(),
+      ),
+      baseCurrency,
+    );
+
+    if ("error" in priceMapResult) return priceMapResult;
+
+    const prices = priceMapResult.data;
+    const today = new Date().toISOString().slice(0, 10);
+    const fxCache = new Map<string, number>();
+    const totalsByAccount: Record<string, number> = {};
+
+    for (const holding of grouped.values()) {
+      const marketPrice = prices[holding.price_key];
+
+      if (marketPrice == null) {
+        totalsByAccount[holding.account_id] =
+          (totalsByAccount[holding.account_id] ?? 0) + holding.total_cost;
+        continue;
+      }
+
+      let currentValueBase = holding.quantity * marketPrice;
+
+      if (holding.asset_type !== "crypto" && holding.currency !== baseCurrency) {
+        const key = `${today}:${holding.currency}:${baseCurrency}`;
+        let fxRate = fxCache.get(key);
+        if (fxRate == null) {
+          const fxResult = await getOrFetchFxRate({
+            date: today,
+            from: holding.currency,
+            to: baseCurrency,
+          });
+          if ("error" in fxResult) return fxResult;
+          fxRate = fxResult.data;
+          fxCache.set(key, fxRate);
+        }
+        currentValueBase *= fxRate;
+      }
+
+      totalsByAccount[holding.account_id] =
+        (totalsByAccount[holding.account_id] ?? 0) + currentValueBase;
+    }
+
+    return { data: totalsByAccount };
+  } catch {
+    return { error: "Error al obtener valor actual de inversiones" };
+  }
+}
+
+export async function getCurrentInvestmentValuesByMonth(
+  year: number,
+): Promise<ActionResult<Record<number, { currentValue: number; costBasis: number }>>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+    const { data: prefs } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const baseCurrency = prefs?.base_currency ?? "USD";
+    const investmentsResult = await getInvestments();
+    if ("error" in investmentsResult) return investmentsResult;
+
+    const investments = investmentsResult.data;
+    if (investments.length === 0) return { data: {} };
+
+    const priceMapResult = await fetchCurrentPrices(
+      Array.from(
+        new Map(
+          investments.map((investment) => {
+            const key = investment.ticker?.trim() || investment.isin?.trim() || investment.asset_name.trim();
+            return [key, {
+              key,
+              ticker: investment.ticker,
+              isin: investment.isin,
+              assetType: investment.asset_type,
+            }];
+          }),
+        ).values(),
+      ),
+      baseCurrency,
+    );
+    if ("error" in priceMapResult) return priceMapResult;
+
+    const prices = priceMapResult.data;
+    const totalsByMonth: Record<number, { currentValue: number; costBasis: number }> = {};
+    const today = new Date().toISOString().slice(0, 10);
+    const fxCache = new Map<string, number>();
+
+    const monthSet = new Set<number>();
+    for (const investment of investments) {
+      const purchaseDate = new Date(`${investment.purchase_date}T00:00:00`);
+      const purchaseYear = purchaseDate.getFullYear();
+      const purchaseMonth = purchaseDate.getMonth() + 1;
+      if (purchaseYear > year) continue;
+      for (let month = purchaseYear < year ? 1 : purchaseMonth; month <= 12; month += 1) {
+        monthSet.add(month);
+      }
+    }
+
+    for (const month of monthSet) {
+      totalsByMonth[month] = { currentValue: 0, costBasis: 0 };
+    }
+
+    for (const investment of investments) {
+      const purchaseDate = new Date(`${investment.purchase_date}T00:00:00`);
+      const purchaseYear = purchaseDate.getFullYear();
+      const purchaseMonth = purchaseDate.getMonth() + 1;
+      if (purchaseYear > year) continue;
+
+      const priceKey = investment.ticker?.trim() || investment.isin?.trim() || investment.asset_name.trim();
+      const price = prices[priceKey];
+
+      let currentValue = price != null ? investment.quantity * price : investment.total_cost;
+
+      if (investment.asset_type !== "crypto" && investment.currency !== baseCurrency) {
+        const fxKey = `${today}:${investment.currency}:${baseCurrency}`;
+        let fxRate = fxCache.get(fxKey);
+        if (fxRate == null) {
+          const fxResult = await getOrFetchFxRate({
+            date: today,
+            from: investment.currency,
+            to: baseCurrency,
+          });
+          if ("error" in fxResult) return fxResult;
+          fxRate = fxResult.data;
+          fxCache.set(fxKey, fxRate);
+        }
+        currentValue *= fxRate;
+      }
+
+      const startMonth = purchaseYear < year ? 1 : purchaseMonth;
+      for (let month = startMonth; month <= 12; month += 1) {
+        totalsByMonth[month] = {
+          currentValue: (totalsByMonth[month]?.currentValue ?? 0) + currentValue,
+          costBasis: (totalsByMonth[month]?.costBasis ?? 0) + investment.total_cost,
+        };
+      }
+    }
+
+    return { data: totalsByMonth };
+  } catch {
+    return { error: "Error al obtener valores actuales por mes" };
+  }
+}
+
+export async function lookupInvestmentInstrument(input: {
+  ticker?: string | null;
+  isin?: string | null;
+}): Promise<
+  ActionResult<{
+    ticker: string | null;
+    asset_name: string | null;
+    currency: string | null;
+    price_per_unit: number | null;
+  }>
+> {
+  try {
+    const query = input.isin?.trim() || input.ticker?.trim();
+    if (!query) return { error: "Ingresá un ticker o ISIN" };
+
+    const instrument = await fetchTwelveDataInstrument(query);
+    if (!instrument) return { error: "No se encontró el activo" };
+
+    return {
+      data: {
+        ticker: instrument.symbol,
+        asset_name: instrument.name,
+        currency: instrument.currency,
+        price_per_unit: instrument.price,
+      },
+    };
+  } catch {
+    return { error: "Error al buscar activo" };
+  }
+}
+
 export async function transferInvestmentPosition(
   input: unknown,
 ): Promise<ActionResult<null>> {
@@ -354,7 +608,9 @@ export async function transferInvestmentPosition(
     if (sourceError) return { error: sourceError.message };
 
     const matchingLots = (sourceLots ?? []).filter(
-      (lot) => (lot.ticker ?? null) === (parsed.data.ticker ?? null),
+      (lot) =>
+        (lot.ticker ?? null) === (parsed.data.ticker ?? null) &&
+        (lot.isin ?? null) === (parsed.data.isin ?? null),
     );
 
     const availableQuantity = matchingLots.reduce(
@@ -383,6 +639,7 @@ export async function transferInvestmentPosition(
         account_id: parsed.data.destination_account_id,
         asset_name: lot.asset_name,
         ticker: lot.ticker,
+        isin: lot.isin,
         asset_type: lot.asset_type,
         quantity: movedQuantity,
         price_per_unit: lot.price_per_unit,
@@ -428,50 +685,64 @@ export async function transferInvestmentPosition(
 /* ------------------------------------------------------------------ */
 
 export async function fetchCurrentPrices(
-  tickers: { ticker: string; assetType: string }[],
+  tickers: { key: string; ticker?: string | null; isin?: string | null; assetType: string }[],
   baseCurrency: string
 ): Promise<ActionResult<Record<string, number>>> {
   try {
     const prices: Record<string, number> = {};
 
-    // Separar por tipo
     const cryptoTickers = tickers
       .filter((t) => t.assetType === "crypto")
-      .map((t) => t.ticker);
-    const stockTickers = tickers
-      .filter((t) => t.assetType !== "crypto")
-      .map((t) => t.ticker);
+      .map((t) => ({ key: t.key, code: (t.ticker ?? t.key).trim().toUpperCase() }));
+    const marketTickers = tickers.filter((t) => t.assetType !== "crypto");
 
-    // Crypto: CoinGecko
     if (cryptoTickers.length > 0) {
       const cryptoPrices = await fetchCryptoPrices(
-        cryptoTickers,
+        cryptoTickers.map((ticker) => ticker.code),
         baseCurrency
       );
-      for (const [code, price] of Object.entries(cryptoPrices)) {
-        prices[code] = price;
+      for (const ticker of cryptoTickers) {
+        const price = cryptoPrices[ticker.code];
+        if (price != null) prices[ticker.key] = price;
       }
     }
 
-    // Stocks/ETFs: yahoo-finance2
-    if (stockTickers.length > 0) {
-      try {
-        const yahooFinance = await import("yahoo-finance2");
-        const yf = yahooFinance.default;
+    if (marketTickers.length > 0) {
+      const twelveDataPrices = await fetchTwelveDataPrices(
+        marketTickers.map((ticker) => ({
+          key: ticker.key,
+          symbol: ticker.ticker,
+          isin: ticker.isin,
+        })),
+      );
 
-        for (const ticker of stockTickers) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const quote: any = await yf.quote(ticker);
-            if (quote && typeof quote.regularMarketPrice === "number") {
-              prices[ticker] = quote.regularMarketPrice;
-            }
-          } catch {
-            // Ticker no encontrado, continuar con los demás
-          }
+      for (const ticker of marketTickers) {
+        const resolved = twelveDataPrices[ticker.key];
+        if (resolved) {
+          prices[ticker.key] = resolved.price;
         }
-      } catch {
-        // yahoo-finance2 no disponible
+      }
+
+      const unresolved = marketTickers.filter((ticker) => prices[ticker.key] == null && ticker.ticker);
+      if (unresolved.length > 0) {
+        try {
+          const yahooFinance = await import("yahoo-finance2");
+          const yf = yahooFinance.default;
+
+          for (const ticker of unresolved) {
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const quote: any = await yf.quote(ticker.ticker!);
+              if (quote && typeof quote.regularMarketPrice === "number") {
+                prices[ticker.key] = quote.regularMarketPrice;
+              }
+            } catch {
+              // continue
+            }
+          }
+        } catch {
+          // ignore fallback errors
+        }
       }
     }
 

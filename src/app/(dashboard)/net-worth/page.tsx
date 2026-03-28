@@ -25,6 +25,10 @@ import {
 } from "@/hooks/useNetWorth";
 import { useBaseCurrency } from "@/hooks/useTransactions";
 import { useCurrencies } from "@/hooks/useAccounts";
+import {
+  useCurrentInvestmentValuesByAccount,
+  useCurrentInvestmentValuesByMonth,
+} from "@/hooks/useInvestments";
 import { MONTH_NAMES, formatAmount, amountTone } from "@/lib/format";
 import { ACCOUNT_TYPE_LABELS, type AccountType } from "@/types/accounts";
 import { NetWorthEvolutionChart } from "./_components/NetWorthEvolutionChart";
@@ -137,21 +141,60 @@ function NetWorthContent({
   const { data: assetsSummary, isLoading: loadingAssets } = useAccountNetWorth(year);
   const { data: liabilities, isLoading: loadingLiabilities } = useLiabilitiesForYear(year);
   const { data: evolution, isLoading: loadingEvolution } = useNetWorthEvolution(year);
+  const {
+    data: currentInvestmentValues,
+    isLoading: loadingCurrentInvestmentValues,
+  } = useCurrentInvestmentValuesByAccount();
+  const {
+    data: currentInvestmentValuesByMonth,
+    isLoading: loadingCurrentInvestmentValuesByMonth,
+  } = useCurrentInvestmentValuesByMonth(year);
 
   const safeAssetsSummary = assetsSummary ?? { total: 0, accounts: [], month: 0, year };
   const safeLiabilities = liabilities ?? { total: 0, items: [], year };
   const safeEvolution = evolution ?? [];
+  const safeCurrentInvestmentValues = currentInvestmentValues ?? {};
 
-  const totalAssets = safeAssetsSummary.total ?? 0;
+  const accountsWithCurrentValues = useMemo(
+    () =>
+      safeAssetsSummary.accounts.map((account) => ({
+        ...account,
+        investment_value_base:
+          safeCurrentInvestmentValues[account.id] ?? account.investment_value_base,
+      })),
+    [safeAssetsSummary.accounts, safeCurrentInvestmentValues],
+  );
+
+  const evolutionWithCurrentValues = useMemo(
+    () =>
+      safeEvolution.map((point) => {
+        const monthValues = currentInvestmentValuesByMonth?.[point.month];
+        if (!monthValues) return point;
+
+        const delta = monthValues.currentValue - monthValues.costBasis;
+
+        return {
+          ...point,
+          assets: point.assets + delta,
+          netWorth: point.netWorth + delta,
+        };
+      }),
+    [currentInvestmentValuesByMonth, safeEvolution],
+  );
+
+  const totalAssets = accountsWithCurrentValues.reduce(
+    (sum, account) => sum + account.balance_base + account.investment_value_base,
+    0,
+  );
   const totalLiabilities = safeLiabilities.total ?? 0;
   const netWorth = totalAssets - totalLiabilities;
 
   const groupedAccounts = useMemo(() => {
     const map = new Map<
       string,
-      { type: AccountType; label: string; accounts: typeof safeAssetsSummary.accounts; total: number }
+      { type: AccountType; label: string; accounts: typeof accountsWithCurrentValues; total: number }
     >();
-    for (const acc of safeAssetsSummary.accounts) {
+    for (const acc of accountsWithCurrentValues) {
       const type = acc.account_type as AccountType;
       if (!map.has(type)) {
         map.set(type, {
@@ -166,9 +209,9 @@ function NetWorthContent({
       group.total += acc.balance_base + acc.investment_value_base;
     }
     return Array.from(map.values());
-  }, [safeAssetsSummary]);
+  }, [accountsWithCurrentValues]);
 
-  if (loadingAssets || loadingLiabilities || loadingEvolution || !assetsSummary || !liabilities || !evolution) {
+  if (loadingAssets || loadingLiabilities || loadingEvolution || loadingCurrentInvestmentValues || loadingCurrentInvestmentValuesByMonth || !assetsSummary || !liabilities || !evolution) {
     return <NetWorthContentFallback />;
   }
 
@@ -180,7 +223,7 @@ function NetWorthContent({
         <Card className="gap-0 py-0"><CardHeader className="px-4 pt-4 pb-2"><CardDescription>Patrimonio Neto</CardDescription></CardHeader><CardContent className="px-4 pb-4"><p className={`text-2xl font-bold ${amountTone(netWorth)}`}>{currencySymbol} {formatAmount(netWorth)}</p></CardContent></Card>
       </div>
 
-      <NetWorthEvolutionChart data={safeEvolution} currencySymbol={currencySymbol} />
+      <NetWorthEvolutionChart data={evolutionWithCurrentValues} currencySymbol={currencySymbol} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-3">
@@ -193,11 +236,19 @@ function NetWorthContent({
                 <div className="border-b bg-muted/30 px-4 py-2"><span className="text-sm font-semibold">{group.label}</span><span className="text-muted-foreground ml-2 text-xs">{currencySymbol} {formatAmount(group.total)}</span></div>
                 {group.accounts.map((acc) => {
                   const totalValueBase = acc.balance_base + acc.investment_value_base;
+                  const cashValueBase = acc.balance_base;
+                  const showInvestmentBreakdown =
+                    acc.investment_value_base > 0 &&
+                    Math.abs(cashValueBase) > 0.01;
                   return (
                     <div key={acc.id} className="flex items-center justify-between border-b px-4 py-3 last:border-b-0">
                       <div>
                         <span className="text-sm font-medium">{acc.name}</span>
-                        {acc.investment_value_base > 0 && <span className="text-muted-foreground ml-2 text-xs">(inv: {currencySymbol} {formatAmount(acc.investment_value_base)})</span>}
+                        {showInvestmentBreakdown && (
+                          <span className="text-muted-foreground ml-2 text-xs">
+                            (cash: {currencySymbol} {formatAmount(cashValueBase)} · inv: {currencySymbol} {formatAmount(acc.investment_value_base)})
+                          </span>
+                        )}
                       </div>
                       <div className="text-right"><span className="text-sm font-medium">{currencySymbol} {formatAmount(totalValueBase)}</span></div>
                     </div>
