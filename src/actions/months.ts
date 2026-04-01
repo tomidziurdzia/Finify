@@ -64,41 +64,6 @@ export async function getMonths(): Promise<ActionResult<Month[]>> {
   }
 }
 
-/**
- * A month is "closed" when a later month exists for the same user.
- * Closed months cannot have transactions created/edited/deleted.
- */
-export async function isMonthClosed(
-  monthId: string
-): Promise<ActionResult<boolean>> {
-  try {
-    const supabase = await createClient();
-    const { data: month, error: monthError } = await supabase
-      .from("months")
-      .select("year, month, user_id")
-      .eq("id", monthId)
-      .maybeSingle();
-
-    if (monthError) return { error: monthError.message };
-    if (!month) return { data: false };
-
-    const { data: laterMonth } = await supabase
-      .from("months")
-      .select("id")
-      .eq("user_id", month.user_id)
-      .or(
-        `year.gt.${month.year},and(year.eq.${month.year},month.gt.${month.month})`
-      )
-      .limit(1)
-      .maybeSingle();
-
-    return { data: laterMonth !== null };
-  } catch (e) {
-    console.error("isMonthClosed:", e);
-    return { error: "Error al verificar estado del mes" };
-  }
-}
-
 export async function getOrCreateCurrentMonth(): Promise<ActionResult<Month>> {
   const now = new Date();
   return createMonth(now.getFullYear(), now.getMonth() + 1);
@@ -352,8 +317,9 @@ export async function createMonth(
 
       const { data: prevMovements, error: prevMovementsError } = await supabase
         .from("transaction_amounts")
-        .select("account_id, amount, base_amount, transactions!inner(month_id)")
-        .eq("transactions.month_id", previousMonth.id);
+        .select("account_id, amount, base_amount, transactions!inner(month_id, deleted_at)")
+        .eq("transactions.month_id", previousMonth.id)
+        .is("transactions.deleted_at", null);
       if (prevMovementsError) return { error: prevMovementsError.message };
 
       for (const row of prevMovements ?? []) {
@@ -392,6 +358,151 @@ export async function createMonth(
     return { data: newMonth };
   } catch {
     return { error: "Error al crear mes" };
+  }
+}
+
+/**
+ * Recalculate opening balances for all months after the given monthId.
+ * Call this after creating/updating/deleting transactions in a past month.
+ */
+export async function recalculateOpeningBalances(
+  monthId: string
+): Promise<void> {
+  try {
+    const supabase = await createClient();
+    const { data: baseMonth } = await supabase
+      .from("months")
+      .select("id, year, month, user_id")
+      .eq("id", monthId)
+      .single();
+
+    if (!baseMonth) return;
+
+    // Get all months for this user, sorted chronologically
+    const { data: allMonths } = await supabase
+      .from("months")
+      .select("id, year, month")
+      .eq("user_id", baseMonth.user_id)
+      .order("year", { ascending: true })
+      .order("month", { ascending: true });
+
+    if (!allMonths || allMonths.length === 0) return;
+
+    const baseCode = toYearMonthCode(baseMonth.year, baseMonth.month);
+    // Find months that come after (or equal to) the base month
+    const monthsToRecalc = allMonths.filter(
+      (m) => toYearMonthCode(m.year, m.month) > baseCode
+    );
+
+    if (monthsToRecalc.length === 0) return;
+
+    // Get active accounts
+    const { data: accounts } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("user_id", baseMonth.user_id)
+      .eq("is_active", true);
+    const activeAccountIds = (accounts ?? []).map((a) => a.id);
+    if (activeAccountIds.length === 0) return;
+
+    // Process each month sequentially: opening = prev opening + prev transactions
+    for (const month of monthsToRecalc) {
+      // Find the previous month
+      const monthCode = toYearMonthCode(month.year, month.month);
+      const prevMonth = allMonths
+        .filter((m) => toYearMonthCode(m.year, m.month) < monthCode)
+        .pop();
+
+      if (!prevMonth) continue;
+
+      // Get previous month's opening balances
+      const { data: prevOpenings } = await supabase
+        .from("opening_balances")
+        .select("account_id, opening_amount, opening_base_amount")
+        .eq("month_id", prevMonth.id);
+
+      const openingByAccount = new Map<
+        string,
+        { opening_amount: number; opening_base_amount: number }
+      >();
+      for (const row of prevOpenings ?? []) {
+        openingByAccount.set(row.account_id, {
+          opening_amount: Number(row.opening_amount),
+          opening_base_amount: Number(row.opening_base_amount),
+        });
+      }
+
+      // Add previous month's transactions
+      const { data: prevMovements } = await supabase
+        .from("transaction_amounts")
+        .select(
+          "account_id, amount, base_amount, transactions!inner(month_id, deleted_at)"
+        )
+        .eq("transactions.month_id", prevMonth.id)
+        .is("transactions.deleted_at", null);
+
+      for (const row of prevMovements ?? []) {
+        const current = openingByAccount.get(row.account_id) ?? {
+          opening_amount: 0,
+          opening_base_amount: 0,
+        };
+        openingByAccount.set(row.account_id, {
+          opening_amount: current.opening_amount + Number(row.amount),
+          opening_base_amount:
+            current.opening_base_amount + Number(row.base_amount),
+        });
+      }
+
+      // Upsert opening balances for this month
+      const openingRows = activeAccountIds.map((accountId) => {
+        const values = openingByAccount.get(accountId) ?? {
+          opening_amount: 0,
+          opening_base_amount: 0,
+        };
+        return {
+          month_id: month.id,
+          account_id: accountId,
+          opening_amount: values.opening_amount,
+          opening_base_amount: values.opening_base_amount,
+        };
+      });
+
+      if (openingRows.length > 0) {
+        await supabase
+          .from("opening_balances")
+          .upsert(openingRows, { onConflict: "month_id,account_id" });
+      }
+    }
+  } catch (e) {
+    console.error("recalculateOpeningBalances:", e);
+  }
+}
+
+/**
+ * Recalculate opening balances for ALL months (from the earliest).
+ * One-time fix for stale data.
+ */
+export async function recalculateAllOpeningBalances(): Promise<ActionResult<null>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+    const { data: allMonths } = await supabase
+      .from("months")
+      .select("id, year, month")
+      .eq("user_id", userId)
+      .order("year", { ascending: true })
+      .order("month", { ascending: true });
+
+    if (!allMonths || allMonths.length < 2) return { data: null };
+
+    // Recalculate from the first month
+    await recalculateOpeningBalances(allMonths[0].id);
+
+    return { data: null };
+  } catch {
+    return { error: "Error al recalcular saldos" };
   }
 }
 

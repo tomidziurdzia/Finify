@@ -14,7 +14,7 @@ import type {
   TransactionWithRelations,
   TransactionAmountWithRelations,
 } from "@/types/transactions";
-import { createMonth, getMonthsInRange, isMonthClosed } from "@/actions/months";
+import { createMonth, getMonthsInRange, recalculateOpeningBalances } from "@/actions/months";
 
 type ActionResult<T> = { data: T } | { error: string };
 
@@ -502,15 +502,6 @@ export async function createTransaction(
     const resolvedMonth = await resolveMonthIdFromDate(parsed.data.date);
     if ("error" in resolvedMonth) return { error: resolvedMonth.error };
 
-    const closedCheck = await isMonthClosed(resolvedMonth.data);
-    if ("error" in closedCheck) return { error: closedCheck.error };
-    if (closedCheck.data) {
-      return {
-        error:
-          "Este mes está cerrado. Creá una corrección en el mes actual.",
-      };
-    }
-
     const amountLines = parsed.data.amounts;
     const accountIds = [...new Set(amountLines.map((line) => line.account_id))];
     const { data: accounts, error: accountError } = await supabase
@@ -592,6 +583,9 @@ export async function createTransaction(
       return { error: lineError.message };
     }
 
+    // Recalculate opening balances for subsequent months
+    recalculateOpeningBalances(resolvedMonth.data).catch(console.error);
+
     return { data: transaction as Transaction };
   } catch (e) {
     console.error("createTransaction:", e);
@@ -618,15 +612,6 @@ export async function createTransfer(
     if (!user) return { error: "No autenticado" };
     const resolvedMonth = await resolveMonthIdFromDate(parsed.data.date);
     if ("error" in resolvedMonth) return { error: resolvedMonth.error };
-
-    const closedCheck = await isMonthClosed(resolvedMonth.data);
-    if ("error" in closedCheck) return { error: closedCheck.error };
-    if (closedCheck.data) {
-      return {
-        error:
-          "Este mes está cerrado. Creá una corrección en el mes actual.",
-      };
-    }
 
     // Lookup both accounts and currencies (maybeSingle avoids throwing on 0 rows)
     const { data: sourceAccount } = await supabase
@@ -699,6 +684,9 @@ export async function createTransfer(
       }
       return { error: lineError.message };
     }
+
+    // Recalculate opening balances for subsequent months
+    recalculateOpeningBalances(resolvedMonth.data).catch(console.error);
 
     return { data: transaction as Transaction };
   } catch (e) {
@@ -816,35 +804,11 @@ export async function updateTransaction(
       return { error: "No se puede cambiar el tipo de transacción" };
     }
 
-    // Block edits on closed months
-    if (existing.month_id) {
-      const closedCheck = await isMonthClosed(existing.month_id);
-      if ("error" in closedCheck) return { error: closedCheck.error };
-      if (closedCheck.data) {
-        return {
-          error:
-            "Este mes está cerrado. Creá una corrección en el mes actual.",
-        };
-      }
-    }
-
     let nextMonthId: string | undefined;
     if (updates.date) {
       const resolvedMonth = await resolveMonthIdFromDate(updates.date);
       if ("error" in resolvedMonth) return { error: resolvedMonth.error };
       nextMonthId = resolvedMonth.data;
-
-      // Also block if target month is closed
-      if (nextMonthId !== existing.month_id) {
-        const targetClosedCheck = await isMonthClosed(nextMonthId);
-        if ("error" in targetClosedCheck) return { error: targetClosedCheck.error };
-        if (targetClosedCheck.data) {
-          return {
-            error:
-              "El mes destino está cerrado. No se puede mover la transacción.",
-          };
-        }
-      }
     }
 
     const payload = {
@@ -974,6 +938,16 @@ export async function updateTransaction(
       if (insertLinesError) return { error: insertLinesError.message };
     }
 
+    // Recalculate opening balances for subsequent months
+    const affectedMonthId = nextMonthId ?? existing.month_id;
+    if (affectedMonthId) {
+      recalculateOpeningBalances(affectedMonthId).catch(console.error);
+      // If transaction moved between months, also recalculate from the old month
+      if (nextMonthId && nextMonthId !== existing.month_id && existing.month_id) {
+        recalculateOpeningBalances(existing.month_id).catch(console.error);
+      }
+    }
+
     return { data: updatedTransaction as Transaction };
   } catch (e) {
     console.error("updateTransaction:", e);
@@ -992,7 +966,6 @@ export async function deleteTransaction(
     } = await supabase.auth.getUser();
     if (!user) return { error: "No autenticado" };
 
-    // Fetch month_id to check if the month is closed
     const { data: tx } = await supabase
       .from("transactions")
       .select("month_id")
@@ -1003,17 +976,6 @@ export async function deleteTransaction(
 
     if (!tx) return { error: "Transacción no encontrada" };
 
-    if (tx.month_id) {
-      const closedCheck = await isMonthClosed(tx.month_id);
-      if ("error" in closedCheck) return { error: closedCheck.error };
-      if (closedCheck.data) {
-        return {
-          error:
-            "Este mes está cerrado. No se puede eliminar la transacción.",
-        };
-      }
-    }
-
     const { error } = await supabase
       .from("transactions")
       .update({ deleted_at: new Date().toISOString() })
@@ -1021,6 +983,11 @@ export async function deleteTransaction(
       .eq("user_id", user.id);
 
     if (error) return { error: error.message };
+
+    // Recalculate opening balances for subsequent months
+    if (tx.month_id) {
+      recalculateOpeningBalances(tx.month_id).catch(console.error);
+    }
 
     return { data: null };
   } catch (e) {
@@ -1040,6 +1007,16 @@ export async function restoreTransaction(
     } = await supabase.auth.getUser();
     if (!user) return { error: "No autenticado" };
 
+    const { data: tx } = await supabase
+      .from("transactions")
+      .select("month_id")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .not("deleted_at", "is", null)
+      .maybeSingle();
+
+    if (!tx) return { error: "Transacción no encontrada" };
+
     const { error } = await supabase
       .from("transactions")
       .update({ deleted_at: null })
@@ -1048,6 +1025,11 @@ export async function restoreTransaction(
       .not("deleted_at", "is", null);
 
     if (error) return { error: error.message };
+
+    // Recalculate opening balances for subsequent months
+    if (tx.month_id) {
+      recalculateOpeningBalances(tx.month_id).catch(console.error);
+    }
 
     return { data: null };
   } catch (e) {
