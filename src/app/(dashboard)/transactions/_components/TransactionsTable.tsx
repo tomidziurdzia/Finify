@@ -12,7 +12,6 @@ import {
   Pencil,
   Trash2,
   ArrowLeftRight,
-  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -75,6 +74,7 @@ import { parseISO, format } from "date-fns";
 import type { Month, NextMonthPreview } from "@/types/months";
 import { MONTH_NAMES, formatAmount, amountTone } from "@/lib/format";
 import { useMonthSummary, getPrimaryLine } from "@/hooks/useMonthSummary";
+import { recalculateAllOpeningBalances } from "@/actions/months";
 
 type TableTransaction = TransactionWithRelations & {
   primaryLine: NonNullable<ReturnType<typeof getPrimaryLine>> | null;
@@ -129,9 +129,9 @@ export function TransactionsTable() {
   const sortedMonths = months ?? [];
   const monthOptions = useMemo(
     () =>
-      sortedMonths.map((month, idx) => ({
+      sortedMonths.map((month) => ({
         id: month.id,
-        label: `${MONTH_NAMES[month.month - 1]} ${month.year}${idx > 0 ? " 🔒" : ""}`,
+        label: `${MONTH_NAMES[month.month - 1]} ${month.year}`,
       })),
     [sortedMonths],
   );
@@ -160,6 +160,11 @@ export function TransactionsTable() {
     return () => window.clearTimeout(timeoutId);
   }, [searchDraft]);
 
+  // One-time recalculation of all opening balances to fix stale data
+  useEffect(() => {
+    recalculateAllOpeningBalances().catch(console.error);
+  }, []);
+
   const selectedMonth =
     sortedMonths.find((month) => month.id === selectedMonthId) ?? null;
   const hasActiveFilters =
@@ -168,11 +173,6 @@ export function TransactionsTable() {
     accountIdFilter !== "all" ||
     categoryIdFilter !== "all" ||
     categoryTypeFilter !== "all";
-
-  const isClosedMonth =
-    selectedMonthId != null &&
-    sortedMonths.length > 0 &&
-    selectedMonthId !== sortedMonths[0].id;
 
   const {
     data: transactions,
@@ -383,8 +383,6 @@ export function TransactionsTable() {
                 size="icon"
                 aria-label="Editar transacción"
                 onClick={() => handleEdit(tx)}
-                disabled={isClosedMonth}
-                title={isClosedMonth ? "Mes cerrado" : "Editar"}
               >
                 <Pencil className="size-4" />
               </Button>
@@ -393,8 +391,6 @@ export function TransactionsTable() {
                 size="icon"
                 aria-label="Eliminar transacción"
                 onClick={() => setDeletingTx(tx)}
-                disabled={isClosedMonth}
-                title={isClosedMonth ? "Mes cerrado" : "Eliminar"}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -403,7 +399,7 @@ export function TransactionsTable() {
         },
       },
     ],
-    [baseCurrencySymbol, isClosedMonth],
+    [baseCurrencySymbol],
   );
 
   const table = useReactTable({
@@ -506,7 +502,6 @@ export function TransactionsTable() {
       <TransactionsToolbar
         selectedMonthId={selectedMonthId}
         monthOptions={monthOptions}
-        isClosedMonth={isClosedMonth}
         isBusy={ensureCurrentMonth.isPending}
         isCreatingMonth={createNextMonth.isPending || previewNextMonth.isPending}
         onMonthChange={setSelectedMonthId}
@@ -518,18 +513,7 @@ export function TransactionsTable() {
       {selectedMonth && (
         <p className="text-lg font-semibold">
           {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
-          {isClosedMonth && (
-            <Lock className="ml-2 inline-block size-4 text-amber-600" />
-          )}
         </p>
-      )}
-
-      {isClosedMonth && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <Lock className="mr-2 inline-block size-4" />
-          Este mes está cerrado. Para corregir, creá una transacción de
-          corrección en el mes actual.
-        </div>
       )}
 
       <TransactionsSummaryCards
@@ -657,7 +641,7 @@ export function TransactionsTable() {
                       onClick={handleCreateTx}
                       variant="outline"
                       size="sm"
-                      disabled={!selectedMonthId || isClosedMonth}
+                      disabled={!selectedMonthId}
                     >
                       <Plus className="mr-1 size-4" />
                       Crear transacción
@@ -865,7 +849,6 @@ export function TransactionsTable() {
 const TransactionsToolbar = memo(function TransactionsToolbar({
   selectedMonthId,
   monthOptions,
-  isClosedMonth,
   isBusy,
   isCreatingMonth,
   onMonthChange,
@@ -875,7 +858,6 @@ const TransactionsToolbar = memo(function TransactionsToolbar({
 }: {
   selectedMonthId: string | null;
   monthOptions: Array<{ id: string; label: string }>;
-  isClosedMonth: boolean;
   isBusy: boolean;
   isCreatingMonth: boolean;
   onMonthChange: (value: string) => void;
@@ -907,12 +889,12 @@ const TransactionsToolbar = memo(function TransactionsToolbar({
           onClick={onCreateTransfer}
           size="sm"
           variant="outline"
-          disabled={!selectedMonthId || isClosedMonth}
+          disabled={!selectedMonthId}
         >
           <ArrowLeftRight className="mr-1 size-4" />
           Transferencia
         </Button>
-        <Button onClick={onCreateTransaction} size="sm" disabled={!selectedMonthId || isClosedMonth}>
+        <Button onClick={onCreateTransaction} size="sm" disabled={!selectedMonthId}>
           <Plus className="mr-1 size-4" />
           Nueva transacción
         </Button>
