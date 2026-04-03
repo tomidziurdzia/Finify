@@ -14,6 +14,7 @@ import type {
   NwSnapshot,
   AccountNetWorthSummary,
   LiabilitiesSummary,
+  LiabilitiesMonthSummary,
   NetWorthEvolutionPoint,
 } from "@/types/net-worth";
 
@@ -607,6 +608,168 @@ export async function getLiabilitiesForYear(
   } catch {
     return { error: "Error al obtener pasivos" };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Pasivos para un mes específico (con carry-forward)                  */
+/* ------------------------------------------------------------------ */
+
+export async function getLiabilitiesForMonth(
+  year: number,
+  month: number
+): Promise<ActionResult<LiabilitiesMonthSummary>> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    const { data: items, error: itemsError } = await supabase
+      .from("nw_items")
+      .select("id, name, currency, currencies ( symbol )")
+      .eq("user_id", userId)
+      .eq("side", "liability")
+      .order("name");
+
+    if (itemsError) return { error: itemsError.message };
+
+    const itemIds = (items ?? []).map((i) => i.id);
+    if (itemIds.length === 0) {
+      return { data: { year, month, total: 0, items: [] } };
+    }
+
+    // Get the latest snapshot per item at or before the requested year/month.
+    // We use two queries: one for the exact year (months <= target) and one
+    // fallback for previous years, to avoid complex PostgREST OR filters.
+    const { data: sameYearSnaps, error: syError } = await supabase
+      .from("nw_snapshots")
+      .select("nw_item_id, year, month, amount, amount_base")
+      .in("nw_item_id", itemIds)
+      .eq("year", year)
+      .lte("month", month)
+      .order("month", { ascending: false });
+
+    if (syError) return { error: syError.message };
+
+    // Keep only the latest snapshot per item from the same year
+    const latestByItem = new Map<
+      string,
+      { amount: number; amount_base: number | null }
+    >();
+    for (const s of sameYearSnaps ?? []) {
+      if (!latestByItem.has(s.nw_item_id)) {
+        latestByItem.set(s.nw_item_id, {
+          amount: Number(s.amount),
+          amount_base: s.amount_base != null ? Number(s.amount_base) : null,
+        });
+      }
+    }
+
+    // Carry-forward: for items without a snapshot this year, check previous years
+    const missingIds = itemIds.filter((id) => !latestByItem.has(id));
+    if (missingIds.length > 0) {
+      const { data: prevSnaps } = await supabase
+        .from("nw_snapshots")
+        .select("nw_item_id, amount, amount_base")
+        .in("nw_item_id", missingIds)
+        .lt("year", year)
+        .order("year", { ascending: false })
+        .order("month", { ascending: false });
+
+      for (const s of prevSnaps ?? []) {
+        if (!latestByItem.has(s.nw_item_id)) {
+          latestByItem.set(s.nw_item_id, {
+            amount: Number(s.amount),
+            amount_base: s.amount_base != null ? Number(s.amount_base) : null,
+          });
+        }
+      }
+    }
+
+    // Fetch base currency
+    const { data: userPref } = await supabase
+      .from("user_preferences")
+      .select("base_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const baseCurrency =
+      (userPref as { base_currency?: string })?.base_currency ?? "EUR";
+
+    const itemCurrencies = [
+      ...new Set((items ?? []).map((i) => i.currency as string)),
+    ];
+    const fxMap = await buildFxMap(supabase, itemCurrencies, baseCurrency);
+
+    let total = 0;
+    const summaryItems = (items ?? []).map((item) => {
+      const snap = latestByItem.get(item.id);
+      const amount = snap?.amount ?? 0;
+      let amountBase = snap?.amount_base ?? null;
+
+      if (amount !== 0 && item.currency !== baseCurrency) {
+        const rate = fxMap.get(item.currency as string) ?? 1;
+        amountBase = amount * rate;
+      }
+
+      const currencyRaw = item.currencies;
+      const currency = Array.isArray(currencyRaw)
+        ? currencyRaw[0]
+        : currencyRaw;
+      const symbol =
+        (currency as { symbol?: string })?.symbol ?? item.currency;
+
+      total += amountBase ?? amount;
+
+      return {
+        item_id: item.id,
+        name: item.name,
+        currency: item.currency,
+        currency_symbol: symbol,
+        amount,
+        amount_base: amountBase,
+      };
+    });
+
+    return { data: { year, month, total, items: summaryItems } };
+  } catch {
+    return { error: "Error al obtener pasivos del mes" };
+  }
+}
+
+/**
+ * Get the current balance for a single debt item (carry-forward).
+ * Used internally by debt activity actions to compute new balance.
+ */
+export async function getDebtCurrentBalance(
+  nwItemId: string,
+  year: number,
+  month: number
+): Promise<number> {
+  const supabase = await createClient();
+
+  // Try same year first
+  const { data: sameYear } = await supabase
+    .from("nw_snapshots")
+    .select("amount")
+    .eq("nw_item_id", nwItemId)
+    .eq("year", year)
+    .lte("month", month)
+    .order("month", { ascending: false })
+    .limit(1);
+
+  if (sameYear && sameYear.length > 0) return Number(sameYear[0].amount);
+
+  // Fallback to previous years
+  const { data: prevYear } = await supabase
+    .from("nw_snapshots")
+    .select("amount")
+    .eq("nw_item_id", nwItemId)
+    .lt("year", year)
+    .order("year", { ascending: false })
+    .order("month", { ascending: false })
+    .limit(1);
+
+  return prevYear && prevYear.length > 0 ? Number(prevYear[0].amount) : 0;
 }
 
 /* ------------------------------------------------------------------ */

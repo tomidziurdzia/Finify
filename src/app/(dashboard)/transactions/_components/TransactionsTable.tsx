@@ -12,6 +12,8 @@ import {
   Pencil,
   Trash2,
   ArrowLeftRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -127,15 +129,6 @@ export function TransactionsTable() {
   const createNextMonth = useCreateNextMonth();
   const previewNextMonth = usePreviewNextMonth();
   const sortedMonths = months ?? [];
-  const monthOptions = useMemo(
-    () =>
-      sortedMonths.map((month) => ({
-        id: month.id,
-        label: `${MONTH_NAMES[month.month - 1]} ${month.year}`,
-      })),
-    [sortedMonths],
-  );
-
   useEffect(() => {
     if (!months || months.length > 0 || ensureCurrentMonth.isPending) return;
     ensureCurrentMonth.mutate();
@@ -501,7 +494,8 @@ export function TransactionsTable() {
     <>
       <TransactionsToolbar
         selectedMonthId={selectedMonthId}
-        monthOptions={monthOptions}
+        selectedMonth={selectedMonth}
+        sortedMonths={sortedMonths}
         isBusy={ensureCurrentMonth.isPending}
         isCreatingMonth={createNextMonth.isPending || previewNextMonth.isPending}
         onMonthChange={setSelectedMonthId}
@@ -509,12 +503,6 @@ export function TransactionsTable() {
         onCreateTransfer={handleCreateTransfer}
         onCreateTransaction={handleCreateTx}
       />
-
-      {selectedMonth && (
-        <p className="text-lg font-semibold">
-          {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
-        </p>
-      )}
 
       <TransactionsSummaryCards
         monthSummary={monthSummary}
@@ -848,7 +836,8 @@ export function TransactionsTable() {
 
 const TransactionsToolbar = memo(function TransactionsToolbar({
   selectedMonthId,
-  monthOptions,
+  selectedMonth,
+  sortedMonths,
   isBusy,
   isCreatingMonth,
   onMonthChange,
@@ -857,7 +846,8 @@ const TransactionsToolbar = memo(function TransactionsToolbar({
   onCreateTransaction,
 }: {
   selectedMonthId: string | null;
-  monthOptions: Array<{ id: string; label: string }>;
+  selectedMonth: Month | null;
+  sortedMonths: Month[];
   isBusy: boolean;
   isCreatingMonth: boolean;
   onMonthChange: (value: string) => void;
@@ -865,21 +855,38 @@ const TransactionsToolbar = memo(function TransactionsToolbar({
   onCreateTransfer: () => void;
   onCreateTransaction: () => void;
 }) {
+  const currentIdx = sortedMonths.findIndex((m) => m.id === selectedMonthId);
+
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <Select value={selectedMonthId ?? ""} onValueChange={onMonthChange} disabled={isBusy}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Seleccionar mes" />
-          </SelectTrigger>
-          <SelectContent>
-            {monthOptions.map((month) => (
-              <SelectItem key={month.id} value={month.id}>
-                {month.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => {
+            if (currentIdx < sortedMonths.length - 1)
+              onMonthChange(sortedMonths[currentIdx + 1].id);
+          }}
+          disabled={!selectedMonthId || currentIdx >= sortedMonths.length - 1}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <span className="min-w-[160px] text-center text-sm font-medium">
+          {selectedMonth
+            ? `${MONTH_NAMES[selectedMonth.month - 1]} ${selectedMonth.year}`
+            : "—"}
+        </span>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => {
+            if (currentIdx > 0)
+              onMonthChange(sortedMonths[currentIdx - 1].id);
+          }}
+          disabled={!selectedMonthId || currentIdx <= 0}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
         <Button variant="outline" size="sm" onClick={onCreateNextMonth} disabled={isCreatingMonth}>
           {isCreatingMonth ? "Calculando..." : "Nuevo mes"}
         </Button>

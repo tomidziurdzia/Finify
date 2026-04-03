@@ -17,13 +17,23 @@ import {
   upsertNwSnapshot,
   getAccountNetWorth,
   getLiabilitiesForYear,
+  getLiabilitiesForMonth,
   getNetWorthEvolution,
 } from "@/actions/net-worth";
+import {
+  recordDebtPayment,
+  recordDebtAdjustment,
+  getDebtActivities,
+} from "@/actions/debt-activities";
 import type {
   CreateNwItemInput,
   UpdateNwItemInput,
   UpsertNwSnapshotInput,
 } from "@/lib/validations/net-worth.schema";
+import type {
+  RecordDebtPaymentInput,
+  RecordDebtAdjustmentInput,
+} from "@/lib/validations/debt-activity.schema";
 import type { NwItemWithRelations } from "@/types/net-worth";
 import { toast } from "sonner";
 
@@ -305,5 +315,74 @@ export function useSuspenseNetWorthEvolution(year: number) {
     },
     staleTime: 5 * 60_000,
     gcTime: 15 * 60_000,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Hooks para Deudas — mes específico + actividades                    */
+/* ------------------------------------------------------------------ */
+
+export function useLiabilitiesForMonth(year: number, month: number) {
+  return useQuery({
+    queryKey: ["net-worth", "liabilities", year, month],
+    enabled: year > 0 && month > 0,
+    queryFn: async () => {
+      const result = await getLiabilitiesForMonth(year, month);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useDebtActivities(nwItemId: string | null) {
+  return useQuery({
+    queryKey: ["debt-activities", nwItemId],
+    enabled: !!nwItemId,
+    queryFn: async () => {
+      const result = await getDebtActivities(nwItemId!);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useRecordDebtPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: RecordDebtPaymentInput) => {
+      const result = await recordDebtPayment(input);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Pago registrado");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["net-worth"] });
+      queryClient.invalidateQueries({ queryKey: ["debt-activities"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+}
+
+export function useRecordDebtAdjustment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: RecordDebtAdjustmentInput) => {
+      const result = await recordDebtAdjustment(input);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    onError: (err: Error) => toast.error(err.message),
+    onSuccess: () => {
+      toast.success("Ajuste registrado");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["net-worth"] });
+      queryClient.invalidateQueries({ queryKey: ["debt-activities"] });
+    },
   });
 }

@@ -110,3 +110,42 @@ export interface NetWorthEvolutionPoint {
   liabilities: number;
   netWorth: number;
 }
+
+/* ------------------------------------------------------------------ */
+/* Debt activities                                                     */
+/* ------------------------------------------------------------------ */
+
+export const DEBT_ACTIVITY_TYPES = ["payment", "interest", "adjustment"] as const;
+export type DebtActivityType = (typeof DEBT_ACTIVITY_TYPES)[number];
+
+export const DEBT_ACTIVITY_TYPE_LABELS: Record<DebtActivityType, string> = {
+  payment: "Pago",
+  interest: "Interés",
+  adjustment: "Ajuste",
+};
+
+export interface DebtActivity {
+  id: string;
+  nw_item_id: string;
+  transaction_id: string | null;
+  activity_type: DebtActivityType;
+  date: string;
+  amount: number;
+  amount_base: number | null;
+  description: string | null;
+  created_at: string;
+}
+
+export interface LiabilitiesMonthSummary {
+  year: number;
+  month: number;
+  total: number;
+  items: {
+    item_id: string;
+    name: string;
+    currency: string;
+    currency_symbol: string;
+    amount: number;
+    amount_base: number | null;
+  }[];
+}

@@ -2,13 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -32,7 +26,6 @@ import {
 import { MONTH_NAMES, formatAmount, amountTone } from "@/lib/format";
 import { ACCOUNT_TYPE_LABELS, type AccountType } from "@/types/accounts";
 import { NetWorthEvolutionChart } from "./_components/NetWorthEvolutionChart";
-import { ExternalLink } from "lucide-react";
 
 export default function NetWorthPage() {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -89,24 +82,35 @@ export default function NetWorthPage() {
         </p>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Select
-          value={selectedYear?.toString() ?? ""}
-          onValueChange={(v) => setSelectedYear(Number(v))}
-          disabled={ensureCurrentMonth.isPending}
-        >
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="Año" />
-          </SelectTrigger>
-          <SelectContent>
-            {availableYears.map((y) => (
-              <SelectItem key={y} value={y.toString()}>
-                {y}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <NetWorthCaption year={selectedYear} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              const idx = availableYears.indexOf(selectedYear!);
+              if (idx < availableYears.length - 1) setSelectedYear(availableYears[idx + 1]);
+            }}
+            disabled={!selectedYear || availableYears.indexOf(selectedYear) >= availableYears.length - 1}
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <span className="min-w-[80px] text-center text-sm font-medium">
+            {selectedYear}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              const idx = availableYears.indexOf(selectedYear!);
+              if (idx > 0) setSelectedYear(availableYears[idx - 1]);
+            }}
+            disabled={!selectedYear || availableYears.indexOf(selectedYear) <= 0}
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+          <NetWorthCaption year={selectedYear!} />
+        </div>
       </div>
 
       <NetWorthContent

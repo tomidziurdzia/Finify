@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Banknote,
+  TrendingUp,
+  History,
+  MoreVertical,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,75 +31,91 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   useDebts,
   useDeleteNwItem,
-  useNwMonthSummary,
+  useLiabilitiesForMonth,
 } from "@/hooks/useNetWorth";
 import { useMonths } from "@/hooks/useMonths";
 import { formatAmount, MONTH_NAMES } from "@/lib/format";
 import type { NwItemWithRelations } from "@/types/net-worth";
 import { DebtDialog } from "./DebtDialog";
+import { DebtPaymentDialog } from "./DebtPaymentDialog";
+import { DebtAdjustmentDialog } from "./DebtAdjustmentDialog";
+import { DebtHistoryDialog } from "./DebtHistoryDialog";
 
 export function DebtsTable() {
   const { data: debts, isLoading, isError, error, refetch } = useDebts();
   const deleteMutation = useDeleteNwItem();
   const { data: months } = useMonths();
-  const [selectedMonthId, setSelectedMonthId] = useState<string | null>(null);
 
-  const currentYear = useMemo(() => {
-    if (!months || months.length === 0) return new Date().getFullYear();
-    const years = months.map((m) => m.year);
-    return Math.max(...years);
-  }, [months]);
+  // Month/year navigation
+  const now = new Date();
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
 
-  const monthsForYear = useMemo(
-    () =>
-      (months ?? [])
-        .filter((month) => month.year === currentYear)
-        .sort((a, b) => b.month - a.month),
-    [currentYear, months],
+  const { data: liabilities } = useLiabilitiesForMonth(
+    selectedYear,
+    selectedMonth
   );
 
-  useEffect(() => {
-    if (!monthsForYear.length) return;
-    setSelectedMonthId((current) =>
-      current && monthsForYear.some((month) => month.id === current)
-        ? current
-        : monthsForYear[0].id,
-    );
-  }, [monthsForYear]);
-
-  const selectedMonth =
-    monthsForYear.find((month) => month.id === selectedMonthId) ?? monthsForYear[0] ?? null;
-
-  const { data: monthSummary } = useNwMonthSummary(
-    selectedMonth?.year ?? currentYear,
-    selectedMonth?.month ?? 1,
-  );
-
+  // Map item_id → amount from liabilities summary
   const amountByItem = useMemo(() => {
     const map = new Map<string, number>();
-    if (monthSummary) {
-      for (const item of monthSummary.items.filter((item) => item.side === "liability")) {
+    if (liabilities) {
+      for (const item of liabilities.items) {
         map.set(item.item_id, item.amount);
       }
     }
     return map;
-  }, [monthSummary]);
+  }, [liabilities]);
 
+  // Navigation helpers
+  const goToPrevMonth = () => {
+    if (selectedMonth === 1) {
+      setSelectedMonth(12);
+      setSelectedYear((y) => y - 1);
+    } else {
+      setSelectedMonth((m) => m - 1);
+    }
+  };
+
+  const goToNextMonth = () => {
+    if (selectedMonth === 12) {
+      setSelectedMonth(1);
+      setSelectedYear((y) => y + 1);
+    } else {
+      setSelectedMonth((m) => m + 1);
+    }
+  };
+
+  const isCurrentMonth =
+    selectedYear === now.getFullYear() &&
+    selectedMonth === now.getMonth() + 1;
+
+  // Dialog states
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDebt, setEditingDebt] = useState<
     (NwItemWithRelations & { currentAmount?: number }) | null
   >(null);
-  const [deletingDebt, setDeletingDebt] = useState<NwItemWithRelations | null>(null);
+  const [deletingDebt, setDeletingDebt] = useState<NwItemWithRelations | null>(
+    null
+  );
+  const [paymentDebt, setPaymentDebt] = useState<
+    (NwItemWithRelations & { currentAmount?: number }) | null
+  >(null);
+  const [adjustmentDebt, setAdjustmentDebt] = useState<
+    (NwItemWithRelations & { currentAmount?: number }) | null
+  >(null);
+  const [historyDebt, setHistoryDebt] = useState<NwItemWithRelations | null>(
+    null
+  );
 
   const handleCreate = () => {
     setEditingDebt(null);
@@ -114,6 +140,20 @@ export function DebtsTable() {
     }
   };
 
+  const handlePayment = (debt: NwItemWithRelations) => {
+    setPaymentDebt({
+      ...debt,
+      currentAmount: amountByItem.get(debt.id) ?? 0,
+    });
+  };
+
+  const handleAdjustment = (debt: NwItemWithRelations) => {
+    setAdjustmentDebt({
+      ...debt,
+      currentAmount: amountByItem.get(debt.id) ?? 0,
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -126,9 +166,16 @@ export function DebtsTable() {
   if (isError && error) {
     return (
       <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-center">
-        <p className="text-destructive font-medium">Error al cargar las deudas</p>
+        <p className="text-destructive font-medium">
+          Error al cargar las deudas
+        </p>
         <p className="text-muted-foreground mt-1 text-sm">{error.message}</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          onClick={() => refetch()}
+        >
           Reintentar
         </Button>
       </div>
@@ -137,27 +184,28 @@ export function DebtsTable() {
 
   return (
     <>
-      <div className="flex justify-end">
+      {/* Header: month selector + new debt button */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {monthsForYear.length > 0 && (
-            <Select value={selectedMonthId ?? ""} onValueChange={setSelectedMonthId}>
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder="Mes" />
-              </SelectTrigger>
-              <SelectContent>
-                {monthsForYear.map((month) => (
-                  <SelectItem key={month.id} value={month.id}>
-                    {MONTH_NAMES[month.month - 1]} {month.year}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <Button onClick={handleCreate} size="sm">
-            <Plus className="mr-1 size-4" />
-            Nueva deuda
+          <Button variant="outline" size="icon" onClick={goToPrevMonth}>
+            <ChevronLeft className="size-4" />
+          </Button>
+          <span className="min-w-[140px] text-center text-sm font-medium">
+            {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={goToNextMonth}
+            disabled={isCurrentMonth}
+          >
+            <ChevronRight className="size-4" />
           </Button>
         </div>
+        <Button onClick={handleCreate} size="sm">
+          <Plus className="mr-1 size-4" />
+          Nueva deuda
+        </Button>
       </div>
 
       <div className="rounded-md border">
@@ -167,13 +215,16 @@ export function DebtsTable() {
               <TableHead>Nombre</TableHead>
               <TableHead>Moneda</TableHead>
               <TableHead className="text-right">Monto</TableHead>
-              <TableHead className="w-24 text-right">Acciones</TableHead>
+              <TableHead className="w-32 text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {!debts || debts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={4}
+                  className="text-muted-foreground h-32 text-center"
+                >
                   <div className="flex flex-col items-center justify-center gap-3">
                     <p className="text-sm">
                       No hay deudas registradas. Agregá una deuda para empezar.
@@ -194,17 +245,48 @@ export function DebtsTable() {
                   </TableCell>
                   <TableCell className="text-right">
                     <span className="text-sm font-medium">
-                      {debt.currency_symbol} {formatAmount(amountByItem.get(debt.id) ?? 0)}
+                      {debt.currency_symbol}{" "}
+                      {formatAmount(amountByItem.get(debt.id) ?? 0)}
                     </span>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" aria-label="Editar deuda" onClick={() => handleEdit(debt)}>
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" aria-label="Eliminar deuda" onClick={() => setDeletingDebt(debt)}>
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handlePayment(debt)}>
+                            <Banknote className="mr-2 size-4" />
+                            Registrar pago
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleAdjustment(debt)}
+                          >
+                            <TrendingUp className="mr-2 size-4" />
+                            Agregar interés/ajuste
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setHistoryDebt(debt)}
+                          >
+                            <History className="mr-2 size-4" />
+                            Ver historial
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleEdit(debt)}>
+                            <Pencil className="mr-2 size-4" />
+                            Editar deuda
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setDeletingDebt(debt)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="mr-2 size-4" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -214,18 +296,36 @@ export function DebtsTable() {
         </Table>
       </div>
 
-      {selectedMonth && (
-        <p className="text-muted-foreground text-sm">
-          Estás viendo y editando el saldo de deuda al cierre de {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}.
-        </p>
-      )}
+      <p className="text-muted-foreground text-xs">
+        Estás viendo y editando el saldo de deuda al cierre de{" "}
+        {MONTH_NAMES[selectedMonth - 1]} {selectedYear}.
+      </p>
 
+      {/* Dialogs */}
       <DebtDialog
         debt={editingDebt}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        year={selectedMonth?.year ?? currentYear}
-        month={selectedMonth?.month ?? 1}
+        year={selectedYear}
+        month={selectedMonth}
+      />
+
+      <DebtPaymentDialog
+        debt={paymentDebt}
+        open={!!paymentDebt}
+        onOpenChange={(open) => !open && setPaymentDebt(null)}
+      />
+
+      <DebtAdjustmentDialog
+        debt={adjustmentDebt}
+        open={!!adjustmentDebt}
+        onOpenChange={(open) => !open && setAdjustmentDebt(null)}
+      />
+
+      <DebtHistoryDialog
+        debt={historyDebt}
+        open={!!historyDebt}
+        onOpenChange={(open) => !open && setHistoryDebt(null)}
       />
 
       <Dialog
