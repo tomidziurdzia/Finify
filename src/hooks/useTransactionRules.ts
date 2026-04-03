@@ -27,7 +27,7 @@ export function useTransactionRules() {
       if ("error" in result) throw new Error(result.error);
       return result.data;
     },
-    staleTime: 5 * 60_000,
+    staleTime: 1 * 60_000,
   });
 }
 
