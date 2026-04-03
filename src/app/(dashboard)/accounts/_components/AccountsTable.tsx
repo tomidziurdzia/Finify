@@ -85,7 +85,7 @@ export function AccountsTable() {
 
   return (
     <>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end">
         <Button onClick={handleCreate} size="sm">
           <Plus className="mr-1 size-4" />
           Nueva cuenta

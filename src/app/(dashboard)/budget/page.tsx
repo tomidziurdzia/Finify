@@ -2,16 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pencil, Save } from "lucide-react";
+import { Pencil, Save, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Card,
@@ -30,6 +23,7 @@ import {
 } from "@/hooks/useBudget";
 import { useEnsureCurrentMonth, useMonths } from "@/hooks/useMonths";
 import { useBaseCurrency } from "@/hooks/useTransactions";
+import { useInvestments } from "@/hooks/useInvestments";
 import { useCurrencies } from "@/hooks/useAccounts";
 import { useQueryClient } from "@tanstack/react-query";
 import { BUDGET_CATEGORY_LABELS, type BudgetCategory } from "@/types/budget";
@@ -37,10 +31,26 @@ import type { BudgetLineWithPlan } from "@/types/budget";
 import {
   MONTH_NAMES,
   formatAmount,
-  amountTone,
   parseMoneyInput,
   formatMoneyDisplay,
 } from "@/lib/format";
+
+/**
+ * Returns a color class for the execution percentage based on category type.
+ * For income: more is better (green). For expenses: less is better (green).
+ */
+function executionColor(type: string, percent: number): string {
+  if (type === "income" || type === "savings" || type === "investments") {
+    // Income/savings/investments: more is better
+    if (percent >= 100) return "text-green-600";
+    if (percent >= 80) return "text-yellow-600";
+    return "text-red-600";
+  }
+  // Expenses, debt payments: under budget is good
+  if (percent <= 50) return "text-green-600";
+  if (percent <= 80) return "text-yellow-600";
+  return "text-red-600";
+}
 
 const CATEGORY_HEADER_STYLES: Record<string, string> = {
   income: "bg-teal-700 text-white",
@@ -177,24 +187,46 @@ export default function BudgetPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Select
-            value={selectedMonthId ?? ""}
-            onValueChange={setSelectedMonthId}
-            disabled={ensureCurrentMonth.isPending}
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              const idx = sortedMonths.findIndex((m) => m.id === selectedMonthId);
+              if (idx < sortedMonths.length - 1) setSelectedMonthId(sortedMonths[idx + 1].id);
+            }}
+            disabled={
+              !selectedMonthId ||
+              sortedMonths.findIndex((m) => m.id === selectedMonthId) >= sortedMonths.length - 1
+            }
           >
-            <SelectTrigger className="w-52">
-              <SelectValue placeholder="Seleccionar mes" />
-            </SelectTrigger>
-            <SelectContent>
-              {sortedMonths.map((month) => (
-                <SelectItem key={month.id} value={month.id}>
-                  {MONTH_NAMES[month.month - 1]} {month.year}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ChevronLeft className="size-4" />
+          </Button>
+          <span className="min-w-[160px] text-center text-sm font-medium">
+            {selectedMonth
+              ? `${MONTH_NAMES[selectedMonth.month - 1]} ${selectedMonth.year}`
+              : "—"}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              const idx = sortedMonths.findIndex((m) => m.id === selectedMonthId);
+              if (idx > 0) setSelectedMonthId(sortedMonths[idx - 1].id);
+            }}
+            disabled={
+              !selectedMonthId ||
+              sortedMonths.findIndex((m) => m.id === selectedMonthId) <= 0
+            }
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link href="/budget/categories">Categorías</Link>
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -204,21 +236,11 @@ export default function BudgetPage() {
             Crear mes siguiente
           </Button>
         </div>
-        <div className="flex items-center gap-2">
-          <Button asChild size="sm" variant="outline">
-            <Link href="/budget/categories">Categorías</Link>
-          </Button>
-        </div>
       </div>
-
-      {selectedMonth && (
-        <p className="text-lg font-semibold">
-          {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
-        </p>
-      )}
 
       <BudgetMonthContent
         selectedMonthId={selectedMonthId}
+        selectedMonth={selectedMonth}
         currencySymbol={currencySymbol}
         amountDraftByCategoryId={amountDraftByCategoryId}
         editingCategoryIds={editingCategoryIds}
@@ -237,6 +259,7 @@ export default function BudgetPage() {
 
 function BudgetMonthContent({
   selectedMonthId,
+  selectedMonth,
   currencySymbol,
   amountDraftByCategoryId,
   editingCategoryIds,
@@ -249,6 +272,7 @@ function BudgetMonthContent({
   onEnsureLineForCategory,
 }: {
   selectedMonthId: string;
+  selectedMonth: { year: number; month: number } | null;
   currencySymbol: string;
   amountDraftByCategoryId: Record<string, string>;
   editingCategoryIds: Record<string, boolean>;
@@ -313,14 +337,24 @@ function BudgetMonthContent({
       current.push(row);
       map.set(type, current);
     }
-    return Array.from(map.entries()).map(([type, rows]) => ({
-      type,
-      label: BUDGET_CATEGORY_LABELS[type],
-      rows: rows.sort((a, b) => a.category.name.localeCompare(b.category.name)),
-      plannedTotal: rows.reduce((acc, row) => acc + row.planned, 0),
-      actualTotal: rows.reduce((acc, row) => acc + row.actual, 0),
-      varianceTotal: rows.reduce((acc, row) => acc + row.variance, 0),
-    }));
+    const TYPE_ORDER: Record<string, number> = {
+      income: 0,
+      essential_expenses: 1,
+      discretionary_expenses: 2,
+      investments: 3,
+      debt_payments: 4,
+      savings: 5,
+    };
+    return Array.from(map.entries())
+      .map(([type, rows]) => ({
+        type,
+        label: BUDGET_CATEGORY_LABELS[type],
+        rows: rows.sort((a, b) => a.category.name.localeCompare(b.category.name)),
+        plannedTotal: rows.reduce((acc, row) => acc + row.planned, 0),
+        actualTotal: rows.reduce((acc, row) => acc + row.actual, 0),
+        varianceTotal: rows.reduce((acc, row) => acc + row.variance, 0),
+      }))
+      .sort((a, b) => (TYPE_ORDER[a.type] ?? 99) - (TYPE_ORDER[b.type] ?? 99));
   }, [categoryRows]);
 
   useEffect(() => {
@@ -338,6 +372,49 @@ function BudgetMonthContent({
       return nextDrafts;
     });
   }, [categoryRows, onSetDrafts]);
+
+  // Get investment purchases for the selected month
+  const { data: allInvestments } = useInvestments();
+  const monthInvestmentTotal = useMemo(() => {
+    if (!allInvestments || !selectedMonth) return 0;
+    return allInvestments
+      .filter((inv) => {
+        const d = new Date(`${inv.purchase_date}T00:00:00`);
+        return d.getFullYear() === selectedMonth.year && d.getMonth() + 1 === selectedMonth.month;
+      })
+      .reduce((sum, inv) => sum + Math.abs(inv.total_cost), 0);
+  }, [allInvestments, selectedMonth]);
+
+  // Compute grouped totals for summary cards (must be before early return)
+  const groupedTotals = useMemo(() => {
+    const income = { planned: 0, actual: 0 };
+    const expenses = { planned: 0, actual: 0 };
+    const savings = { planned: 0, actual: 0 };
+    const investments = { planned: 0, actual: 0 };
+
+    for (const group of rowsByType) {
+      if (group.type === "income") {
+        income.planned += group.plannedTotal;
+        income.actual += group.actualTotal;
+      } else if (group.type === "savings") {
+        savings.planned += group.plannedTotal;
+      } else if (group.type === "investments") {
+        investments.planned += group.plannedTotal;
+      } else {
+        expenses.planned += group.plannedTotal;
+        expenses.actual += group.actualTotal;
+      }
+    }
+
+    // Inversiones real: del módulo de inversiones (compras del mes)
+    investments.actual = monthInvestmentTotal;
+    // Plan de ahorro: lo que debería sobrar según el presupuesto
+    savings.planned = income.planned - expenses.planned - investments.planned;
+    // Ahorro real: lo que sobra después de gastos e inversiones
+    savings.actual = income.actual - expenses.actual - investments.actual;
+
+    return { income, expenses, savings, investments };
+  }, [rowsByType, monthInvestmentTotal]);
 
   if (categoriesLoading || linesLoading || summaryLoading || !categories || !lines || !summary) {
     return <BudgetContentFallback />;
@@ -363,10 +440,39 @@ function BudgetMonthContent({
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="gap-0 py-0"><CardHeader className="px-4 pt-4 pb-2"><CardDescription>Plan total</CardDescription></CardHeader><CardContent className="px-4 pb-4"><p className="text-2xl font-semibold">{currencySymbol} {formatAmount(safeSummary.totals.planned)}</p></CardContent></Card>
-        <Card className="gap-0 py-0"><CardHeader className="px-4 pt-4 pb-2"><CardDescription>Real total</CardDescription></CardHeader><CardContent className="px-4 pb-4"><p className="text-2xl font-semibold">{currencySymbol} {formatAmount(safeSummary.totals.actual)}</p></CardContent></Card>
-        <Card className="gap-0 py-0"><CardHeader className="px-4 pt-4 pb-2"><CardDescription>Desvío total</CardDescription></CardHeader><CardContent className="px-4 pb-4"><p className={`text-2xl font-semibold ${amountTone(safeSummary.totals.variance)}`}>{currencySymbol} {formatAmount(safeSummary.totals.variance)}</p></CardContent></Card>
-        <Card className="gap-0 py-0"><CardHeader className="px-4 pt-4 pb-2"><CardDescription>Categorías activas</CardDescription></CardHeader><CardContent className="px-4 pb-4"><p className="text-2xl font-semibold">{categoryRows.length}</p></CardContent></Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-1"><CardDescription>Ingresos</CardDescription></CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className={`text-2xl font-semibold ${groupedTotals.income.actual >= groupedTotals.income.planned ? "text-green-600" : "text-amber-600"}`}>{currencySymbol} {formatAmount(groupedTotals.income.actual)}</p>
+            <p className="text-muted-foreground text-xs">Plan: {currencySymbol} {formatAmount(groupedTotals.income.planned)}</p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-1"><CardDescription>Gastos</CardDescription></CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className={`text-2xl font-semibold ${groupedTotals.expenses.actual <= groupedTotals.expenses.planned ? "text-green-600" : "text-red-600"}`}>{currencySymbol} {formatAmount(groupedTotals.expenses.actual)}</p>
+            <p className="text-muted-foreground text-xs">Plan: {currencySymbol} {formatAmount(groupedTotals.expenses.planned)}</p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-1"><CardDescription>Inversiones</CardDescription></CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className={`text-2xl font-semibold ${groupedTotals.investments.actual > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>{currencySymbol} {formatAmount(groupedTotals.investments.actual)}</p>
+            <p className="text-muted-foreground text-xs">Plan: {currencySymbol} {formatAmount(groupedTotals.investments.planned)}</p>
+          </CardContent>
+        </Card>
+        <Card className="gap-0 py-0">
+          <CardHeader className="px-4 pt-4 pb-1"><CardDescription>Ahorro</CardDescription></CardHeader>
+          <CardContent className="px-4 pb-4">
+            <p className={`text-2xl font-semibold ${groupedTotals.savings.actual >= 0 ? "text-cyan-600" : "text-red-600"}`}>{currencySymbol} {formatAmount(groupedTotals.savings.actual)}</p>
+            <p className="text-muted-foreground text-xs">Plan: {currencySymbol} {formatAmount(groupedTotals.savings.planned)}</p>
+            {groupedTotals.savings.planned > 0 && (
+              <p className={`text-xs font-medium ${groupedTotals.savings.actual >= groupedTotals.savings.planned ? "text-green-600" : "text-red-600"}`}>
+                {groupedTotals.savings.actual >= groupedTotals.savings.planned ? "+" : ""}{currencySymbol} {formatAmount(groupedTotals.savings.actual - groupedTotals.savings.planned)} vs plan
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <div className="space-y-3">
@@ -377,7 +483,11 @@ function BudgetMonthContent({
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {rowsByType.map((group) => {
-              const executionPercent = group.plannedTotal > 0 ? (group.actualTotal / group.plannedTotal) * 100 : 0;
+              // For investments, use real from investments module; for savings, use calculated value
+              const effectiveActual = group.type === "investments" ? monthInvestmentTotal
+                : group.type === "savings" ? groupedTotals.savings.actual
+                : group.actualTotal;
+              const executionPercent = group.plannedTotal > 0 ? (effectiveActual / group.plannedTotal) * 100 : 0;
               return (
                 <div key={group.type} className="overflow-hidden rounded-md border bg-white">
                   <div className={`px-3 py-2 text-xs font-semibold ${CATEGORY_HEADER_STYLES[group.type] ?? "bg-muted text-foreground"}`}>{group.label}</div>
@@ -416,7 +526,7 @@ function BudgetMonthContent({
                   </div>
                   <div className="border-t bg-muted/30 px-3 py-2">
                     <div className="grid grid-cols-[1fr_auto] text-xs font-medium"><span>Total</span><span>{currencySymbol} {formatAmount(group.plannedTotal)}</span></div>
-                    <div className="mt-2 flex items-center justify-between text-xs"><span className="text-muted-foreground">Ejecutado: {currencySymbol} {formatAmount(group.actualTotal)}</span><span className={amountTone(group.varianceTotal)}>{executionPercent.toFixed(2)}%</span></div>
+                    <div className="mt-2 flex items-center justify-between text-xs"><span className="text-muted-foreground">Ejecutado: {currencySymbol} {formatAmount(effectiveActual)}</span><span className={executionColor(group.type, executionPercent)}>{executionPercent.toFixed(0)}%</span></div>
                   </div>
                 </div>
               );
