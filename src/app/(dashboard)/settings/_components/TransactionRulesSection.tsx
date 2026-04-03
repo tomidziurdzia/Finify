@@ -53,6 +53,8 @@ import {
   useDeleteTransactionRule,
 } from "@/hooks/useTransactionRules";
 import { useBudgetCategories } from "@/hooks/useBudget";
+import { useAccounts } from "@/hooks/useAccounts";
+import { AccountCombobox } from "@/components/account-combobox";
 import {
   MATCH_FIELD_LABELS,
   MATCH_TYPE_LABELS,
@@ -67,6 +69,7 @@ type RuleFormValues = {
   match_type: string;
   match_value: string;
   action_category_id: string;
+  action_account_id: string;
   action_rename: string;
   priority: string;
 };
@@ -89,12 +92,15 @@ function RuleDialog({
       match_type: "contains",
       match_value: "",
       action_category_id: "",
+      action_account_id: "",
       action_rename: "",
       priority: "0",
     },
   });
 
   const { data: categories } = useBudgetCategories();
+  const { data: accounts } = useAccounts();
+  const activeAccounts = accounts?.filter((a) => a.is_active) ?? [];
   const createMutation = useCreateTransactionRule();
   const updateMutation = useUpdateTransactionRule();
 
@@ -109,6 +115,7 @@ function RuleDialog({
         match_type: rule.match_type,
         match_value: rule.match_value,
         action_category_id: rule.action_category_id ?? "",
+        action_account_id: rule.action_account_id ?? "",
         action_rename: rule.action_rename ?? "",
         priority: String(rule.priority),
       });
@@ -119,6 +126,7 @@ function RuleDialog({
         match_type: "contains",
         match_value: "",
         action_category_id: "",
+        action_account_id: "",
         action_rename: "",
         priority: "0",
       });
@@ -143,6 +151,7 @@ function RuleDialog({
       match_type: values.match_type as "contains" | "starts_with" | "exact",
       match_value: values.match_value.trim(),
       action_category_id: values.action_category_id || null,
+      action_account_id: values.action_account_id || null,
       action_rename: values.action_rename.trim() || null,
       priority: parseInt(values.priority, 10) || 0,
       is_active: true,
@@ -300,6 +309,25 @@ function RuleDialog({
 
             <FormField
               control={form.control}
+              name="action_account_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Asignar cuenta</FormLabel>
+                  <FormControl>
+                    <AccountCombobox
+                      accounts={activeAccounts}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      disabled={isPending}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="action_rename"
               render={({ field }) => (
                 <FormItem>
@@ -429,6 +457,7 @@ export function TransactionRulesSection() {
                     <TableHead>Nombre</TableHead>
                     <TableHead>Condición</TableHead>
                     <TableHead>Categoría</TableHead>
+                    <TableHead>Cuenta</TableHead>
                     <TableHead>Renombrar</TableHead>
                     <TableHead className="w-16 text-center">Prio</TableHead>
                     <TableHead className="w-24 text-right">Acciones</TableHead>
@@ -458,6 +487,11 @@ export function TransactionRulesSection() {
                       </TableCell>
                       <TableCell className="text-sm">
                         {rule.category_name ?? (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {rule.account_name ?? (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>

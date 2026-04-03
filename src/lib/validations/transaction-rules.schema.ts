@@ -24,6 +24,12 @@ export const CreateTransactionRuleSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => v || null),
+  action_account_id: z
+    .string()
+    .uuid()
+    .nullable()
+    .optional()
+    .transform((v) => v || null),
   action_rename: z
     .string()
     .max(200)

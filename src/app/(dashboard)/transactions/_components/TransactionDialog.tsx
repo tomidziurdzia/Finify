@@ -37,7 +37,8 @@ import {
   useUsageCounts,
 } from "@/hooks/useTransactions";
 import { AccountCombobox } from "@/components/account-combobox";
-import { useMatchRules } from "@/hooks/useTransactionRules";
+import { useMatchRules, useCreateTransactionRule } from "@/hooks/useTransactionRules";
+import { Checkbox } from "@/components/ui/checkbox";
 import { CreateTransactionSchema } from "@/lib/validations/transaction.schema";
 import { formatNumberInput, parseNumberInput } from "@/lib/utils";
 import { fetchExchangeRate } from "@/lib/frankfurter";
@@ -105,6 +106,10 @@ export function TransactionDialog({
   const createMutation = useCreateTransaction();
   const updateMutation = useUpdateTransaction();
   const matchRules = useMatchRules();
+  const createRuleMutation = useCreateTransactionRule();
+
+  // Toggle to save current transaction as an auto-categorization rule
+  const createRuleRef = useRef(false);
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
@@ -249,6 +254,7 @@ export function TransactionDialog({
       });
     }
     baseManuallyEdited.current = false;
+    createRuleRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transaction, open, activeAccounts.length]);
 
@@ -321,6 +327,9 @@ export function TransactionDialog({
       if (match) {
         if (match.category_id) {
           form.setValue("category_id", match.category_id);
+        }
+        if (match.account_id) {
+          form.setValue("account_id", match.account_id);
         }
         if (match.rename_to) {
           form.setValue("description", match.rename_to);
@@ -417,6 +426,32 @@ export function TransactionDialog({
       } else {
         await createMutation.mutateAsync(parsed.data);
       }
+
+      // Create auto-categorization rule if checkbox was checked
+      if (createRuleRef.current && parsed.data.description) {
+        try {
+          const categoryName = (categories ?? []).find(
+            (c) => c.id === parsed.data.category_id
+          )?.name;
+          const ruleName = categoryName
+            ? `${parsed.data.description} -> ${categoryName}`
+            : parsed.data.description;
+          await createRuleMutation.mutateAsync({
+            name: ruleName,
+            match_field: "description" as const,
+            match_type: "contains" as const,
+            match_value: parsed.data.description,
+            action_category_id: parsed.data.category_id ?? null,
+            action_account_id: parsed.data.amounts[0]?.account_id ?? null,
+            action_rename: null,
+            priority: 0,
+            is_active: true,
+          });
+        } catch {
+          // Silently ignore rule creation errors
+        }
+      }
+      createRuleRef.current = false;
       onOpenChange(false);
     } catch {
       // Error handled by mutation onError (toast)
@@ -663,6 +698,18 @@ export function TransactionDialog({
               </FormItem>
             )}
           />
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="create-rule"
+              onCheckedChange={(checked) => {
+                createRuleRef.current = checked === true;
+              }}
+            />
+            <Label htmlFor="create-rule" className="text-sm font-normal cursor-pointer">
+              Crear regla de auto-categorización con esta transacción
+            </Label>
+          </div>
 
           <DialogFooter>
             <Button

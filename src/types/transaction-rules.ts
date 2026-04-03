@@ -23,6 +23,7 @@ export interface TransactionRule {
   match_type: MatchType;
   match_value: string;
   action_category_id: string | null;
+  action_account_id: string | null;
   action_rename: string | null;
   priority: number;
   is_active: boolean;
@@ -32,6 +33,7 @@ export interface TransactionRule {
 
 export interface TransactionRuleWithCategory extends TransactionRule {
   category_name: string | null;
+  account_name: string | null;
 }
 
 export interface RuleMatch {
@@ -39,5 +41,7 @@ export interface RuleMatch {
   rule_name: string;
   category_id: string | null;
   category_name: string | null;
+  account_id: string | null;
+  account_name: string | null;
   rename_to: string | null;
 }

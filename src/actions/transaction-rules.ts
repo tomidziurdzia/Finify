@@ -28,7 +28,8 @@ export async function getTransactionRules(): Promise<
       .select(
         `
         *,
-        budget_categories!action_category_id ( name )
+        budget_categories!action_category_id ( name ),
+        accounts!action_account_id ( name )
       `
       )
       .eq("user_id", user.id)
@@ -41,7 +42,9 @@ export async function getTransactionRules(): Promise<
     const mapped = (data ?? []).map((row: any) => ({
       ...row,
       category_name: row.budget_categories?.name ?? null,
+      account_name: row.accounts?.name ?? null,
       budget_categories: undefined,
+      accounts: undefined,
     }));
 
     return { data: mapped as TransactionRuleWithCategory[] };
@@ -75,7 +78,8 @@ export async function createTransactionRule(
       .select(
         `
         *,
-        budget_categories!action_category_id ( name )
+        budget_categories!action_category_id ( name ),
+        accounts!action_account_id ( name )
       `
       )
       .single();
@@ -88,6 +92,7 @@ export async function createTransactionRule(
       data: {
         ...row,
         category_name: row.budget_categories?.name ?? null,
+        account_name: row.accounts?.name ?? null,
       } as TransactionRuleWithCategory,
     };
   } catch (e) {
@@ -124,7 +129,8 @@ export async function updateTransactionRule(
       .select(
         `
         *,
-        budget_categories!action_category_id ( name )
+        budget_categories!action_category_id ( name ),
+        accounts!action_account_id ( name )
       `
       )
       .single();
@@ -137,6 +143,7 @@ export async function updateTransactionRule(
       data: {
         ...row,
         category_name: row.budget_categories?.name ?? null,
+        account_name: row.accounts?.name ?? null,
       } as TransactionRuleWithCategory,
     };
   } catch (e) {
@@ -187,8 +194,9 @@ export async function matchTransactionRules(
       .select(
         `
         id, name, match_field, match_type, match_value,
-        action_category_id, action_rename,
-        budget_categories!action_category_id ( name )
+        action_category_id, action_account_id, action_rename,
+        budget_categories!action_category_id ( name ),
+        accounts!action_account_id ( name )
       `
       )
       .eq("user_id", user.id)
@@ -226,6 +234,8 @@ export async function matchTransactionRules(
             rule_name: rule.name,
             category_id: rule.action_category_id,
             category_name: rule.budget_categories?.name ?? null,
+            account_id: rule.action_account_id,
+            account_name: rule.accounts?.name ?? null,
             rename_to: rule.action_rename,
           },
         };
