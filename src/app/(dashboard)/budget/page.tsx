@@ -491,42 +491,66 @@ function BudgetMonthContent({
               return (
                 <div key={group.type} className="overflow-hidden rounded-md border bg-white">
                   <div className={`px-3 py-2 text-xs font-semibold ${CATEGORY_HEADER_STYLES[group.type] ?? "bg-muted text-foreground"}`}>{group.label}</div>
-                  <div className="grid grid-cols-[1fr_auto] border-b bg-muted/20 px-3 py-2 text-xs font-medium"><span>Subcategoría</span><span>Monto</span></div>
-                  <div className="max-h-56 overflow-auto">
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-2 border-b bg-muted/20 px-3 py-2 text-xs font-medium">
+                    <span>Subcategoría</span>
+                    <span className="w-32 text-right">Plan</span>
+                    <span className="w-24 text-right">Ejecutado</span>
+                  </div>
+                  <div className="max-h-72 overflow-auto">
                     {group.rows.length === 0 ? (
                       <div className="text-muted-foreground px-3 py-2 text-xs">Sin categorías cargadas.</div>
                     ) : (
-                      group.rows.map((row) => (
-                        <div key={row.category.id} className="grid grid-cols-[1fr_auto] gap-2 border-b px-3 py-2 text-xs">
-                          <span className="truncate self-center">{row.category.name}</span>
-                          <div className="flex items-center gap-2">
-                            <Input className="h-8 w-32 text-right" value={amountDraftByCategoryId[row.category.id] ?? formatAmount(row.planned)} onChange={(event) => onDraftAmountChange(row.category.id, event.target.value)} onBlur={() => onDraftAmountBlur(row.category.id)} inputMode="decimal" placeholder="0,00" disabled={!editingCategoryIds[row.category.id]} />
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              title={editingCategoryIds[row.category.id] ? "Guardar monto" : "Editar monto"}
-                              onClick={async () => {
-                                if (!editingCategoryIds[row.category.id]) {
-                                  onSetEditingCategoryIds((prev) => ({ ...prev, [row.category.id]: true }));
-                                  return;
-                                }
-                                const saved = await handleSaveCategoryAmount(row.category);
-                                if (saved) {
-                                  onSetEditingCategoryIds((prev) => ({ ...prev, [row.category.id]: false }));
-                                }
-                              }}
-                              disabled={upsertPlan.isPending || createLine.isPending}
-                            >
-                              {editingCategoryIds[row.category.id] ? <Save className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                            </Button>
+                      group.rows.map((row) => {
+                        const rowPercent = row.planned > 0 ? (row.actual / row.planned) * 100 : 0;
+                        return (
+                          <div key={row.category.id} className="grid grid-cols-[1fr_auto_auto] gap-2 border-b px-3 py-2 text-xs">
+                            <span className="truncate self-center">{row.category.name}</span>
+                            <div className="flex items-center gap-1">
+                              <Input className="h-8 w-32 text-right" value={amountDraftByCategoryId[row.category.id] ?? formatAmount(row.planned)} onChange={(event) => onDraftAmountChange(row.category.id, event.target.value)} onBlur={() => onDraftAmountBlur(row.category.id)} inputMode="decimal" placeholder="0,00" disabled={!editingCategoryIds[row.category.id]} />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 w-8 p-0"
+                                title={editingCategoryIds[row.category.id] ? "Guardar monto" : "Editar monto"}
+                                onClick={async () => {
+                                  if (!editingCategoryIds[row.category.id]) {
+                                    onSetEditingCategoryIds((prev) => ({ ...prev, [row.category.id]: true }));
+                                    return;
+                                  }
+                                  const saved = await handleSaveCategoryAmount(row.category);
+                                  if (saved) {
+                                    onSetEditingCategoryIds((prev) => ({ ...prev, [row.category.id]: false }));
+                                  }
+                                }}
+                                disabled={upsertPlan.isPending || createLine.isPending}
+                              >
+                                {editingCategoryIds[row.category.id] ? <Save className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                              </Button>
+                            </div>
+                            <div className="flex w-24 flex-col items-end justify-center">
+                              <span className={`font-medium ${row.actual === 0 ? "text-muted-foreground" : executionColor(group.type, rowPercent)}`}>
+                                {currencySymbol} {formatAmount(row.actual)}
+                              </span>
+                              {row.planned > 0 && row.actual > 0 && (
+                                <span className={`text-[10px] ${executionColor(group.type, rowPercent)}`}>
+                                  {rowPercent.toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                   <div className="border-t bg-muted/30 px-3 py-2">
-                    <div className="grid grid-cols-[1fr_auto] text-xs font-medium"><span>Total</span><span>{currencySymbol} {formatAmount(group.plannedTotal)}</span></div>
-                    <div className="mt-2 flex items-center justify-between text-xs"><span className="text-muted-foreground">Ejecutado: {currencySymbol} {formatAmount(effectiveActual)}</span><span className={executionColor(group.type, executionPercent)}>{executionPercent.toFixed(0)}%</span></div>
+                    <div className="grid grid-cols-[1fr_auto_auto] gap-2 text-xs font-medium">
+                      <span>Total</span>
+                      <span className="w-32 text-right">{currencySymbol} {formatAmount(group.plannedTotal)}</span>
+                      <span className={`w-24 text-right ${executionColor(group.type, executionPercent)}`}>{currencySymbol} {formatAmount(effectiveActual)}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-end text-xs">
+                      <span className={executionColor(group.type, executionPercent)}>{executionPercent.toFixed(0)}%</span>
+                    </div>
                   </div>
                 </div>
               );
