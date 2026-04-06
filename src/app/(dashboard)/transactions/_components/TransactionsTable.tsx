@@ -14,6 +14,7 @@ import {
   ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
+  StickyNote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -301,6 +308,24 @@ export function TransactionsTable() {
         accessorKey: "description",
         header: "Descripción",
         enableSorting: false,
+        cell: ({ row }) => {
+          const tx = row.original;
+          return (
+            <div className="flex items-center gap-1.5">
+              <span>{tx.description}</span>
+              {tx.notes && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <StickyNote className="size-3.5 shrink-0 cursor-pointer text-amber-500 hover:text-amber-600" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="text-xs whitespace-pre-wrap">{tx.notes}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          );
+        },
       },
       {
         accessorKey: "transaction_type",
@@ -491,6 +516,7 @@ export function TransactionsTable() {
   }
 
   return (
+    <TooltipProvider>
     <>
       <TransactionsToolbar
         selectedMonthId={selectedMonthId}
@@ -831,6 +857,7 @@ export function TransactionsTable() {
         </DialogContent>
       </Dialog>
     </>
+    </TooltipProvider>
   );
 }
 

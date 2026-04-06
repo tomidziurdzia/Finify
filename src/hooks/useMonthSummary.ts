@@ -2,6 +2,13 @@ import { useMemo } from "react";
 import type { TransactionWithRelations } from "@/types/transactions";
 import type { OpeningBalance } from "@/types/months";
 
+export interface CategoryDetail {
+  categoryId: string;
+  categoryName: string;
+  categoryType: string;
+  amount: number;
+}
+
 export interface MonthSummary {
   openingBase: number;
   income: number;
@@ -13,6 +20,7 @@ export interface MonthSummary {
   totalExpenses: number;
   netMonth: number;
   closingBase: number;
+  categoryBreakdown: CategoryDetail[];
 }
 
 export interface AccountBalance {
@@ -48,6 +56,7 @@ export function useMonthSummary(
     let savings = 0;
     let investments = 0;
     let netMonth = 0;
+    const categoryMap = new Map<string, CategoryDetail>();
 
     for (const ob of openingBalances ?? []) {
       openingBase += ob.current_opening_base_amount ?? ob.opening_base_amount ?? 0;
@@ -93,6 +102,21 @@ export function useMonthSummary(
           default:
             break;
         }
+
+        // Accumulate per individual category
+        if (tx.category_id && tx.category_name && tx.category_type) {
+          const existing = categoryMap.get(tx.category_id);
+          if (existing) {
+            existing.amount += absoluteBase;
+          } else {
+            categoryMap.set(tx.category_id, {
+              categoryId: tx.category_id,
+              categoryName: tx.category_name,
+              categoryType: tx.category_type,
+              amount: absoluteBase,
+            });
+          }
+        }
       }
 
       for (const line of tx.amounts) {
@@ -131,6 +155,7 @@ export function useMonthSummary(
         totalExpenses,
         netMonth,
         closingBase: openingBase + netMonth,
+        categoryBreakdown: Array.from(categoryMap.values()).sort((a, b) => b.amount - a.amount),
       },
       accountMonthlyBalances: Array.from(byAccount.values()).sort((a, b) =>
         a.name.localeCompare(b.name),
