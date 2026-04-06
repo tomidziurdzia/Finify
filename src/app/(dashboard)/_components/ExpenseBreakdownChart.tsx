@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   PieChart,
   Pie,
@@ -9,6 +9,8 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -18,6 +20,14 @@ import {
 } from "@/components/ui/card";
 import { formatAmount, CATEGORY_COLORS } from "@/lib/format";
 import type { MonthSummary } from "@/hooks/useMonthSummary";
+import { BUDGET_CATEGORY_LABELS, type BudgetCategoryType } from "@/types/budget";
+
+// Palette for individual categories inside a type
+const DETAIL_PALETTE = [
+  "#2563eb", "#7c3aed", "#db2777", "#ea580c", "#16a34a",
+  "#0891b2", "#4f46e5", "#c026d3", "#d97706", "#059669",
+  "#6366f1", "#e11d48", "#0d9488", "#9333ea", "#ca8a04",
+];
 
 interface ExpenseBreakdownChartProps {
   summary: MonthSummary;
@@ -28,66 +38,112 @@ export function ExpenseBreakdownChart({
   summary,
   currencySymbol,
 }: ExpenseBreakdownChartProps) {
-  const data = useMemo(() => {
+  const [drillType, setDrillType] = useState<BudgetCategoryType | null>(null);
+
+  const typeData = useMemo(() => {
     const raw = [
       {
         name: "Gastos Esenciales",
         value: summary.essentialExpenses,
         fill: CATEGORY_COLORS.essential_expenses,
+        type: "essential_expenses" as BudgetCategoryType,
       },
       {
         name: "Gastos Discrecionales",
         value: summary.discretionaryExpenses,
         fill: CATEGORY_COLORS.discretionary_expenses,
+        type: "discretionary_expenses" as BudgetCategoryType,
       },
       {
         name: "Pago de Deudas",
         value: summary.debtPayments,
         fill: CATEGORY_COLORS.debt_payments,
+        type: "debt_payments" as BudgetCategoryType,
       },
       {
         name: "Ahorros",
         value: summary.savings,
         fill: CATEGORY_COLORS.savings,
+        type: "savings" as BudgetCategoryType,
       },
       {
         name: "Inversiones",
         value: summary.investments,
         fill: CATEGORY_COLORS.investments,
+        type: "investments" as BudgetCategoryType,
       },
     ];
     return raw.filter((d) => d.value > 0);
   }, [summary]);
 
+  const detailData = useMemo(() => {
+    if (!drillType) return [];
+    return (summary.categoryBreakdown ?? [])
+      .filter((c) => c.categoryType === drillType && c.amount > 0)
+      .map((c, i) => ({
+        name: c.categoryName,
+        value: c.amount,
+        fill: DETAIL_PALETTE[i % DETAIL_PALETTE.length],
+      }));
+  }, [drillType, summary.categoryBreakdown]);
+
+  const isDetail = drillType !== null && detailData.length > 0;
+  const chartData = isDetail ? detailData : typeData;
+  const drillLabel = drillType ? BUDGET_CATEGORY_LABELS[drillType] : "";
+
   return (
     <Card>
       <CardHeader className="px-4 pt-4 pb-2">
-        <CardTitle className="text-sm font-semibold">
-          Distribución de Gastos
-        </CardTitle>
-        <CardDescription className="text-xs">
-          Proporción por tipo de categoría.
-        </CardDescription>
+        <div className="flex items-center gap-2">
+          {isDetail && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => setDrillType(null)}
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+          )}
+          <div>
+            <CardTitle className="text-sm font-semibold">
+              {isDetail ? drillLabel : "Distribución de Gastos"}
+            </CardTitle>
+            <CardDescription className="text-xs">
+              {isDetail
+                ? "Desglose por categoría. Hacé click en ← para volver."
+                : "Hacé click en un sector para ver el detalle."}
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="px-4 pb-4">
-        {data.length === 0 ? (
+        {chartData.length === 0 ? (
           <div className="flex h-[250px] items-center justify-center">
             <p className="text-muted-foreground text-sm">
-              Sin gastos registrados este mes.
+              {isDetail
+                ? "Sin transacciones en esta categoría."
+                : "Sin gastos registrados este mes."}
             </p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie
-                data={data}
+                data={chartData}
                 dataKey="value"
                 nameKey="name"
                 innerRadius={50}
                 outerRadius={90}
                 paddingAngle={2}
+                style={{ cursor: isDetail ? "default" : "pointer" }}
+                onClick={(_data, index) => {
+                  if (!isDetail && typeData[index]) {
+                    setDrillType(typeData[index].type);
+                  }
+                }}
               >
-                {data.map((entry) => (
+                {chartData.map((entry) => (
                   <Cell key={entry.name} fill={entry.fill} />
                 ))}
               </Pie>
