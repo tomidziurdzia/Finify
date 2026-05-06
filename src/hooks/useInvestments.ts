@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import {
   getInvestments,
+  getInvestmentSales,
   createInvestment,
   updateInvestment,
   deleteInvestment,
@@ -15,10 +16,12 @@ import {
   getCurrentInvestmentValuesByAccount,
   getCurrentInvestmentValuesByMonth,
   lookupInvestmentInstrument,
+  sellInvestment,
   transferInvestmentPosition,
 } from "@/actions/investments";
 import type {
   CreateInvestmentInput,
+  SellInvestmentInput,
   TransferInvestmentPositionInput,
   UpdateInvestmentInput,
 } from "@/lib/validations/investment.schema";
@@ -27,6 +30,7 @@ import { toast } from "sonner";
 
 export const INVESTMENT_KEYS = {
   all: ["investments"] as const,
+  sales: ["investments", "sales"] as const,
   currentValuesByAccount: ["investments", "current-values-by-account"] as const,
   currentValuesByMonth: (year: number) => ["investments", "current-values-by-month", year] as const,
   prices: (baseCurrency: string, tickersKey: string) =>
@@ -232,6 +236,44 @@ export function useDeleteInvestment() {
       queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
       queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.currentValuesByAccount });
       queryClient.invalidateQueries({ queryKey: ["investments", "current-values-by-month"] });
+      queryClient.invalidateQueries({ queryKey: ["net-worth"] });
+    },
+  });
+}
+
+export function useInvestmentSales() {
+  return useQuery({
+    queryKey: INVESTMENT_KEYS.sales,
+    queryFn: async () => {
+      const result = await getInvestmentSales();
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
+  });
+}
+
+export function useSellInvestment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: SellInvestmentInput) => {
+      const result = await sellInvestment(input);
+      if ("error" in result) throw new Error(result.error);
+      return result.data;
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+    onSuccess: () => {
+      toast.success("Venta registrada");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.sales });
+      queryClient.invalidateQueries({ queryKey: INVESTMENT_KEYS.currentValuesByAccount });
+      queryClient.invalidateQueries({ queryKey: ["investments", "current-values-by-month"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["net-worth"] });
     },
   });
