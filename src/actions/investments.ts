@@ -4,11 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrFetchFxRate } from "@/actions/fx";
 import {
   CreateInvestmentSchema,
+  SellInvestmentSchema,
   TransferInvestmentPositionSchema,
   UpdateInvestmentSchema,
 } from "@/lib/validations/investment.schema";
 import type {
   Investment,
+  InvestmentSale,
+  InvestmentSaleWithAccount,
   InvestmentWithAccount,
   AssetType,
 } from "@/types/investments";
@@ -677,6 +680,315 @@ export async function transferInvestmentPosition(
     return { data: null };
   } catch {
     return { error: "Error al transferir posicion" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Ventas                                                               */
+/* ------------------------------------------------------------------ */
+
+const QTY_EPSILON = 0.00000001;
+
+export async function sellInvestment(
+  input: unknown,
+): Promise<ActionResult<InvestmentSale>> {
+  try {
+    const parsed = SellInvestmentSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        error: parsed.error.issues[0]?.message ?? "Datos inválidos",
+      };
+    }
+
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+
+    const { data: account, error: accError } = await supabase
+      .from("accounts")
+      .select("id, account_type, currency")
+      .eq("id", parsed.data.account_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (accError) return { error: accError.message };
+    if (!account) return { error: "Cuenta no encontrada" };
+
+    const { data: lots, error: lotsError } = await supabase
+      .from("investments")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("account_id", parsed.data.account_id)
+      .eq("asset_name", parsed.data.asset_name)
+      .eq("asset_type", parsed.data.asset_type)
+      .eq("currency", parsed.data.currency)
+      .order("purchase_date", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (lotsError) return { error: lotsError.message };
+
+    const matchingLots = (lots ?? []).filter(
+      (lot) =>
+        (lot.ticker ?? null) === (parsed.data.ticker ?? null) &&
+        (lot.isin ?? null) === (parsed.data.isin ?? null),
+    );
+
+    const totalQuantity = matchingLots.reduce(
+      (sum, lot) => sum + Number(lot.quantity),
+      0,
+    );
+
+    if (totalQuantity <= 0) {
+      return { error: "No hay posición para vender" };
+    }
+
+    if (parsed.data.quantity_sold > totalQuantity + QTY_EPSILON) {
+      return { error: "No hay cantidad suficiente para vender" };
+    }
+
+    const totalCostBasis = matchingLots.reduce(
+      (sum, lot) => sum + Number(lot.total_cost),
+      0,
+    );
+    const avgCost = totalCostBasis / totalQuantity;
+    const costBasisOfSale = Number(
+      (parsed.data.quantity_sold * avgCost).toFixed(4),
+    );
+    const grossProceeds = Number(
+      (parsed.data.quantity_sold * parsed.data.price_per_unit).toFixed(4),
+    );
+    const fees = parsed.data.fees ?? 0;
+    const tax = parsed.data.tax ?? 0;
+    const realizedPnl = Number(
+      (grossProceeds - fees - tax - costBasisOfSale).toFixed(4),
+    );
+    const netProceeds = Number((grossProceeds - fees - tax).toFixed(4));
+
+    const { data: saleRow, error: saleError } = await supabase
+      .from("investment_sales")
+      .insert({
+        user_id: userId,
+        account_id: parsed.data.account_id,
+        asset_name: parsed.data.asset_name,
+        ticker: parsed.data.ticker ?? null,
+        isin: parsed.data.isin ?? null,
+        asset_type: parsed.data.asset_type,
+        quantity_sold: parsed.data.quantity_sold,
+        price_per_unit: parsed.data.price_per_unit,
+        total_proceeds: grossProceeds,
+        fees,
+        tax,
+        cost_basis: costBasisOfSale,
+        realized_pnl: realizedPnl,
+        currency: parsed.data.currency,
+        sale_date: parsed.data.sale_date,
+        notes: parsed.data.notes ?? null,
+      })
+      .select()
+      .single();
+
+    if (saleError) return { error: saleError.message };
+
+    // Reducir lotes proporcionalmente para mantener el avg cost
+    const remainingQuantity = totalQuantity - parsed.data.quantity_sold;
+    const factor = remainingQuantity / totalQuantity;
+
+    for (const lot of matchingLots) {
+      const lotQty = Number(lot.quantity);
+      const lotCost = Number(lot.total_cost);
+      const newQty = Number((lotQty * factor).toFixed(8));
+      const newCost = Number((lotCost * factor).toFixed(4));
+
+      if (newQty <= QTY_EPSILON) {
+        const { error: deleteError } = await supabase
+          .from("investments")
+          .delete()
+          .eq("id", lot.id)
+          .eq("user_id", userId);
+        if (deleteError) {
+          await supabase.from("investment_sales").delete().eq("id", saleRow.id);
+          return { error: deleteError.message };
+        }
+      } else {
+        const { error: updateError } = await supabase
+          .from("investments")
+          .update({
+            quantity: newQty,
+            total_cost: newCost,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", lot.id)
+          .eq("user_id", userId);
+        if (updateError) {
+          await supabase.from("investment_sales").delete().eq("id", saleRow.id);
+          return { error: updateError.message };
+        }
+      }
+    }
+
+    if (
+      account.account_type === "investment_broker" &&
+      !parsed.data.skip_credit &&
+      netProceeds > 0
+    ) {
+      const creditError = await autoCreditToAccount(
+        supabase,
+        userId,
+        parsed.data.account_id,
+        account.currency,
+        netProceeds,
+        parsed.data.sale_date,
+        parsed.data.asset_name,
+      );
+      if (creditError) {
+        console.warn("Auto-credit failed:", creditError);
+      }
+    }
+
+    return {
+      data: {
+        ...saleRow,
+        quantity_sold: Number(saleRow.quantity_sold),
+        price_per_unit: Number(saleRow.price_per_unit),
+        total_proceeds: Number(saleRow.total_proceeds),
+        fees: Number(saleRow.fees),
+        tax: Number(saleRow.tax),
+        cost_basis: Number(saleRow.cost_basis),
+        realized_pnl: Number(saleRow.realized_pnl),
+      } as InvestmentSale,
+    };
+  } catch {
+    return { error: "Error al registrar venta" };
+  }
+}
+
+async function autoCreditToAccount(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  userId: string,
+  accountId: string,
+  accountCurrency: string,
+  netProceeds: number,
+  date: string,
+  assetName: string,
+): Promise<string | null> {
+  try {
+    const parsedDate = new Date(`${date}T00:00:00`);
+    const year = parsedDate.getFullYear();
+    const month = parsedDate.getMonth() + 1;
+
+    const { data: monthRow } = await supabase
+      .from("months")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+
+    if (!monthRow) return null;
+
+    const amount = Math.abs(netProceeds);
+
+    const { data: tx, error: txError } = await supabase
+      .from("transactions")
+      .insert({
+        user_id: userId,
+        month_id: monthRow.id,
+        category_id: null,
+        transaction_type: "correction",
+        date,
+        description: `Venta: ${assetName}`,
+        notes: null,
+      })
+      .select()
+      .single();
+
+    if (txError) return txError.message;
+    if (!tx) return "No se pudo crear la transacción de crédito";
+
+    const { error: amountError } = await supabase
+      .from("transaction_amounts")
+      .insert({
+        transaction_id: tx.id,
+        account_id: accountId,
+        amount,
+        original_currency: accountCurrency,
+        exchange_rate: 1,
+        base_amount: amount,
+      });
+
+    if (amountError) {
+      await supabase.from("transactions").delete().eq("id", tx.id);
+      return amountError.message;
+    }
+
+    return null;
+  } catch (e) {
+    console.error("autoCreditToAccount:", e);
+    return e instanceof Error ? e.message : "Error desconocido en auto-crédito";
+  }
+}
+
+export async function getInvestmentSales(): Promise<
+  ActionResult<InvestmentSaleWithAccount[]>
+> {
+  try {
+    const userId = await getUserId();
+    if (!userId) return { error: "No autenticado" };
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("investment_sales")
+      .select(
+        `
+        *,
+        accounts ( name ),
+        currencies ( symbol )
+      `,
+      )
+      .eq("user_id", userId)
+      .order("sale_date", { ascending: false });
+
+    if (error) return { error: error.message };
+
+    const mapped = (data ?? []).map((row) => {
+      const accountRaw = row.accounts;
+      const account = Array.isArray(accountRaw) ? accountRaw[0] : accountRaw;
+      const currencyRaw = row.currencies;
+      const currency = Array.isArray(currencyRaw)
+        ? currencyRaw[0]
+        : currencyRaw;
+
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        account_id: row.account_id,
+        asset_name: row.asset_name,
+        ticker: row.ticker,
+        isin: row.isin,
+        asset_type: row.asset_type as AssetType,
+        quantity_sold: Number(row.quantity_sold),
+        price_per_unit: Number(row.price_per_unit),
+        total_proceeds: Number(row.total_proceeds),
+        fees: Number(row.fees),
+        tax: Number(row.tax),
+        cost_basis: Number(row.cost_basis),
+        realized_pnl: Number(row.realized_pnl),
+        currency: row.currency,
+        sale_date: row.sale_date,
+        notes: row.notes,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        account_name: (account as { name?: string })?.name ?? "",
+        currency_symbol:
+          (currency as { symbol?: string })?.symbol ?? row.currency,
+      } as InvestmentSaleWithAccount;
+    });
+
+    return { data: mapped };
+  } catch {
+    return { error: "Error al obtener ventas" };
   }
 }
 

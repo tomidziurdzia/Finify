@@ -69,3 +69,30 @@ export interface TransferableHolding {
   total_quantity: number;
   account_name: string;
 }
+
+export interface InvestmentSale {
+  id: string;
+  user_id: string;
+  account_id: string;
+  asset_name: string;
+  ticker: string | null;
+  isin: string | null;
+  asset_type: AssetType;
+  quantity_sold: number;
+  price_per_unit: number;
+  total_proceeds: number;
+  fees: number;
+  tax: number;
+  cost_basis: number;
+  realized_pnl: number;
+  currency: string;
+  sale_date: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestmentSaleWithAccount extends InvestmentSale {
+  account_name: string;
+  currency_symbol: string;
+}
