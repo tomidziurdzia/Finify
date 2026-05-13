@@ -1,7 +1,9 @@
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   SidebarInset,
   SidebarProvider,
@@ -20,16 +22,24 @@ async function DashboardLayoutContent({
     redirect("/auth/login");
   }
 
+  const userEmail =
+    typeof data.claims.email === "string" ? data.claims.email : "";
+
+  const cookieStore = await cookies();
+  const sidebarCookie = cookieStore.get("sidebar_state")?.value;
+  const defaultOpen = sidebarCookie === "true";
+
   return (
-    <SidebarProvider defaultOpen={false} className="h-svh overflow-hidden">
-      <AppSidebar />
-      <SidebarInset className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-          <SidebarTrigger className="-ml-1 size-9 shrink-0" />
+    <SidebarProvider defaultOpen={defaultOpen}>
+      <AppSidebar userEmail={userEmail} />
+      <SidebarInset>
+        <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <SidebarTrigger className="-ml-1" />
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
+          </div>
         </header>
-        <div className="flex-1 overflow-auto p-4 md:p-6">
-          {children}
-        </div>
+        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );

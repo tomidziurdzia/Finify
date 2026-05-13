@@ -63,8 +63,8 @@ export default function BudgetCategoriesPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Categorías</h1>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Categorías</h1>
           <p className="text-muted-foreground text-sm">
             Creá categorías y asignales un tipo de movimiento.
           </p>

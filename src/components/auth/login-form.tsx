@@ -44,7 +44,7 @@ export function LoginForm() {
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit)}
-        className="space-y-4"
+        className="space-y-5"
         noValidate
       >
         <FormField
@@ -86,9 +86,12 @@ export function LoginForm() {
         />
 
         {form.formState.errors.root && (
-          <p className="text-sm text-destructive">
+          <div
+            role="alert"
+            className="border-destructive/50 bg-destructive/5 text-destructive rounded-md border px-3 py-2 text-sm"
+          >
             {form.formState.errors.root.message}
-          </p>
+          </div>
         )}
 
         <Button
