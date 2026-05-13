@@ -103,6 +103,11 @@ export function AccountDialog({
   const isCryptoExchange = watchAccountType === "crypto_exchange";
   const isCryptoType = isCryptoWallet || isCryptoExchange;
 
+  const fiatCurrencies =
+    currencies?.filter((c) => c.currency_type === "fiat") ?? [];
+  const cryptoCurrencies =
+    currencies?.filter((c) => c.currency_type === "crypto") ?? [];
+
   // Shared helper: fetch FX rate and update form fields
   const applyFxRate = useCallback(async (currency: string) => {
     if (!baseCurrency || currency === baseCurrency) {
@@ -332,8 +337,6 @@ export function AccountDialog({
     }
   };
 
-  const fiatCurrencies = currencies?.filter((c) => c.currency_type === "fiat") ?? [];
-  const cryptoCurrencies = currencies?.filter((c) => c.currency_type === "crypto") ?? [];
   const etfCurrencies = currencies?.filter((c) => c.currency_type === "etf") ?? [];
 
   const selectedCurrency = watchCurrency;

@@ -2,11 +2,18 @@
   "name": "finify",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@10.30.2",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "db:types:generate": "bash scripts/db-types.sh",
+    "db:types:check": "bash scripts/db-types-check.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -37,7 +44,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4.2.1",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
     "postcss": "^8.5.6",
     "shadcn": "^3.8.5",
     "tailwindcss": "^4.2.1",
