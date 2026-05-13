@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import {
   Home,
   Landmark,
   Settings,
   LogOut,
-  LucideIcon,
+  type LucideIcon,
   BarChart3,
   CalendarDays,
   Wallet,
@@ -19,6 +18,7 @@ import {
   Repeat,
   Target,
 } from "lucide-react";
+
 import {
   Sidebar,
   SidebarContent,
@@ -30,196 +30,134 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
-function useMounted() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  return mounted;
-}
-
-function CollapsedDropdownItem({
-  href,
-  icon: Icon,
-  label,
-  asAnchor,
-  active,
-}: {
+type NavItem = {
   href: string;
   icon: LucideIcon;
   label: string;
-  asAnchor?: boolean;
-  active?: boolean;
+};
+
+const PRIMARY_NAV: NavItem[] = [
+  { href: "/", icon: Home, label: "Dashboard" },
+  { href: "/transactions", icon: ArrowLeftRight, label: "Transacciones" },
+  { href: "/budget", icon: CalendarDays, label: "Presupuesto" },
+  { href: "/recurring", icon: Repeat, label: "Recurrentes" },
+];
+
+const ASSETS_NAV: NavItem[] = [
+  { href: "/accounts", icon: Landmark, label: "Cuentas" },
+  { href: "/investments", icon: TrendingUp, label: "Inversiones" },
+  { href: "/debts", icon: CreditCard, label: "Deudas" },
+  { href: "/savings", icon: Target, label: "Metas de Ahorro" },
+  { href: "/net-worth", icon: BarChart3, label: "Patrimonio" },
+];
+
+const CONFIG_NAV: NavItem[] = [
+  { href: "/budget/categories", icon: Layers, label: "Categorías" },
+  { href: "/settings", icon: Settings, label: "Configuración" },
+];
+
+function isItemActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function NavSection({
+  label,
+  items,
+  pathname,
+}: {
+  label: string;
+  items: NavItem[];
+  pathname: string;
 }) {
-  const { state } = useSidebar();
-  const mounted = useMounted();
-  const collapsed = mounted && state === "collapsed";
-
-  const LinkOrAnchor = asAnchor ? "a" : Link;
-  const buttonClass = active
-    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-    : "";
-
-  if (!collapsed) {
-    return (
-      <SidebarMenuItem>
-        <SidebarMenuButton asChild className={buttonClass}>
-          <LinkOrAnchor href={href}>
-            <Icon className="size-4" />
-            <span>{label}</span>
-          </LinkOrAnchor>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    );
-  }
-
   return (
-    <SidebarMenuItem>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <SidebarMenuButton className={`cursor-pointer ${buttonClass}`}>
-            <Icon className="size-4" />
-            <span>{label}</span>
-          </SidebarMenuButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="start">
-          <DropdownMenuItem asChild>
-            <LinkOrAnchor href={href}>{label}</LinkOrAnchor>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </SidebarMenuItem>
+    <SidebarGroup>
+      <SidebarGroupLabel>{label}</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {items.map((item) => {
+            const Icon = item.icon;
+            const active = isItemActive(pathname, item.href);
+            return (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={active}
+                  tooltip={item.label}
+                >
+                  <Link href={item.href}>
+                    <Icon className="size-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 
-export function AppSidebar() {
+export function AppSidebar({ userEmail }: { userEmail?: string }) {
   const pathname = usePathname();
-  const { state } = useSidebar();
-  const mounted = useMounted();
-  const collapsed = mounted && state === "collapsed";
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
+      <SidebarHeader className="border-b">
         <SidebarMenu>
-          {collapsed ? (
-            <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <SidebarMenuButton className="cursor-pointer">
-                    <Wallet className="size-4 shrink-0" />
-                    <span className="truncate font-semibold">Finify</span>
-                  </SidebarMenuButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="right" align="start">
-                  <DropdownMenuItem asChild>
-                    <Link href="/">Finify</Link>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </SidebarMenuItem>
-          ) : (
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/">
-                  <Wallet className="size-4 shrink-0" />
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              size="lg"
+              tooltip="Finify"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+            >
+              <Link href="/">
+                <div className="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
+                  <Wallet className="size-4" />
+                </div>
+                <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">Finify</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
+                  <span className="truncate text-xs text-muted-foreground">
+                    Finanzas personales
+                  </span>
+                </div>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
+
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navegación</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <CollapsedDropdownItem
-                href="/"
-                icon={Home}
-                label="Dashboard"
-                active={pathname === "/"}
-              />
-              <CollapsedDropdownItem
-                href="/budget"
-                icon={CalendarDays}
-                label="Presupuesto"
-                active={pathname === "/budget"}
-              />
-              <CollapsedDropdownItem
-                href="/budget/categories"
-                icon={Layers}
-                label="Categorías"
-                active={pathname.startsWith("/budget/categories")}
-              />
-              <CollapsedDropdownItem
-                href="/transactions"
-                icon={ArrowLeftRight}
-                label="Transacciones"
-                active={pathname.startsWith("/transactions")}
-              />
-              <CollapsedDropdownItem
-                href="/recurring"
-                icon={Repeat}
-                label="Recurrentes"
-                active={pathname.startsWith("/recurring")}
-              />
-              <CollapsedDropdownItem
-                href="/accounts"
-                icon={Landmark}
-                label="Cuentas"
-                active={pathname.startsWith("/accounts")}
-              />
-              <CollapsedDropdownItem
-                href="/debts"
-                icon={CreditCard}
-                label="Deudas"
-                active={pathname.startsWith("/debts")}
-              />
-              <CollapsedDropdownItem
-                href="/investments"
-                icon={TrendingUp}
-                label="Inversiones"
-                active={pathname.startsWith("/investments")}
-              />
-              <CollapsedDropdownItem
-                href="/savings"
-                icon={Target}
-                label="Metas de Ahorro"
-                active={pathname.startsWith("/savings")}
-              />
-              <CollapsedDropdownItem
-                href="/net-worth"
-                icon={BarChart3}
-                label="Patrimonio"
-                active={pathname.startsWith("/net-worth")}
-              />
-              <CollapsedDropdownItem
-                href="/settings"
-                icon={Settings}
-                label="Configuración"
-                active={pathname.startsWith("/settings")}
-              />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <NavSection label="General" items={PRIMARY_NAV} pathname={pathname} />
+        <NavSection label="Patrimonio" items={ASSETS_NAV} pathname={pathname} />
+        <NavSection label="Ajustes" items={CONFIG_NAV} pathname={pathname} />
       </SidebarContent>
-      <SidebarFooter>
+
+      <SidebarFooter className="border-t">
+        {userEmail ? (
+          <div className="px-2 py-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+            <span className="block truncate" title={userEmail}>
+              {userEmail}
+            </span>
+          </div>
+        ) : null}
         <SidebarMenu>
-          <CollapsedDropdownItem
-            href="/auth/logout"
-            icon={LogOut}
-            label="Cerrar sesión"
-            asAnchor
-          />
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              tooltip="Cerrar sesión"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <a href="/auth/logout">
+                <LogOut className="size-4" />
+                <span>Cerrar sesión</span>
+              </a>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>

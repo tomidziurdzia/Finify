@@ -179,9 +179,9 @@ export default function BudgetPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Presupuesto</h1>
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Presupuesto</h1>
         <p className="text-muted-foreground text-sm">
           Planificá tus categorías por mes y compará plan vs real.
         </p>
