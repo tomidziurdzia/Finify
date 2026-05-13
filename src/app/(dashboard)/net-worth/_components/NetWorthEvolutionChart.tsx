@@ -24,6 +24,17 @@ export function NetWorthEvolutionChart({
   data,
   currencySymbol,
 }: NetWorthEvolutionChartProps) {
+  const chartData = useMemo(
+    () =>
+      data.map((point) => ({
+        name: MONTH_NAMES[point.month - 1]?.slice(0, 3) ?? String(point.month),
+        Activos: point.assets,
+        Pasivos: point.liabilities,
+        Neto: point.netWorth,
+      })),
+    [data],
+  );
+
   if (data.length === 0) {
     return (
       <Card>
@@ -39,13 +50,6 @@ export function NetWorthEvolutionChart({
     );
   }
 
-  const chartData = useMemo(() => data.map((point) => ({
-    name: MONTH_NAMES[point.month - 1]?.slice(0, 3) ?? String(point.month),
-    Activos: point.assets,
-    Pasivos: point.liabilities,
-    Neto: point.netWorth,
-  })), [data]);
-
   return (
     <Card>
       <CardHeader className="px-4 pt-4 pb-2">
@@ -60,10 +64,9 @@ export function NetWorthEvolutionChart({
               tick={{ fontSize: 12 }}
               tickFormatter={(v: number) => formatAmount(v)}
             />
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             <Tooltip
               cursor={false}
-              formatter={(value: any, name: any) => [
+              formatter={(value, name) => [
                 `${currencySymbol} ${formatAmount(Number(value) || 0)}`,
                 String(name),
               ]}

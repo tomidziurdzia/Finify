@@ -78,10 +78,13 @@ export function ForecastChart({ currencySymbol }: ForecastChartProps) {
               width={90}
             />
             <Tooltip
-              formatter={(value: number | undefined) => [
-                `${currencySymbol} ${formatAmount(value ?? 0)}`,
-                "Saldo",
-              ]}
+              formatter={(value) => {
+                const numeric = typeof value === "number" ? value : 0;
+                return [
+                  `${currencySymbol} ${formatAmount(numeric)}`,
+                  "Saldo",
+                ];
+              }}
             />
             {actualCount > 0 && actualCount < chartData.length && (
               <ReferenceLine

@@ -1,0 +1,60 @@
+name: Migration order
+
+# Runs on every PR (no `paths:` filter) so this required check always
+# reports a status — branch protection treats path-filtered workflows as
+# permanently pending, blocking merges on PRs that don't touch migrations.
+# The job itself short-circuits when no new migrations are present.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  order:
+    name: Migration timestamps must be strictly increasing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare migration timestamps against main
+        run: |
+          set -euo pipefail
+
+          # Highest timestamp on main, defaulting to 0 if there are no migrations.
+          base_max=$(git ls-tree --name-only origin/${{ github.base_ref }} -- supabase/migrations \
+            | grep -E '^[0-9]+_' \
+            | cut -d_ -f1 \
+            | sort -n \
+            | tail -n 1 \
+            || true)
+          base_max=${base_max:-0}
+
+          # New migration files introduced by this PR.
+          mapfile -t new_files < <(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- supabase/migrations \
+            | grep -E '^supabase/migrations/[0-9]+_' \
+            || true)
+
+          if [ ${#new_files[@]} -eq 0 ]; then
+            echo "No new migrations in this PR."
+            exit 0
+          fi
+
+          echo "Latest counter/timestamp on main: $base_max"
+
+          for file in "${new_files[@]}"; do
+            ts=$(basename "$file" | cut -d_ -f1)
+            if [ "$ts" -le "$base_max" ]; then
+              echo "::error file=$file::Migration counter $ts is not strictly greater than main's latest $base_max. Two PRs likely raced — rename the file with a fresher counter."
+              exit 1
+            fi
+            echo "OK: $file ($ts > $base_max)"
+            base_max="$ts"
+          done
