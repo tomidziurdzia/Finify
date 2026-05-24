@@ -95,11 +95,8 @@ CREATE POLICY "Users own debt_activities" ON public.debt_activities
     )
   );
 
--- debts
-DROP POLICY IF EXISTS "Users own debts" ON public.debts;
-CREATE POLICY "Users own debts" ON public.debts
-  FOR ALL USING ((SELECT auth.uid()) = user_id)
-  WITH CHECK ((SELECT auth.uid()) = user_id);
+-- debts: table is created in 0024_debts_table.sql, which also installs the
+-- optimized policy directly. Skipped here.
 
 -- investment_sales
 DROP POLICY IF EXISTS "investment_sales_select" ON public.investment_sales;
@@ -317,10 +314,7 @@ CREATE INDEX IF NOT EXISTS idx_budget_recurrence_rules_end_month_id
 CREATE INDEX IF NOT EXISTS idx_debt_activities_transaction_id
   ON public.debt_activities (transaction_id);
 
-CREATE INDEX IF NOT EXISTS idx_debts_currency
-  ON public.debts (currency);
-CREATE INDEX IF NOT EXISTS idx_debts_nw_item_id
-  ON public.debts (nw_item_id);
+-- idx_debts_currency / idx_debts_nw_item_id are added in 0024_debts_table.sql
 
 CREATE INDEX IF NOT EXISTS idx_fx_rates_from_currency
   ON public.fx_rates (from_currency);
