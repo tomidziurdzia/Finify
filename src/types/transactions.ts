@@ -5,6 +5,7 @@ export const TRANSACTION_TYPES = [
   "expense",
   "transfer",
   "correction",
+  "investment",
 ] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
@@ -14,6 +15,7 @@ export const TRANSACTION_TYPE_LABELS: Record<TransactionType, string> = {
   expense: "Gasto",
   transfer: "Transferencia",
   correction: "Corrección",
+  investment: "Inversión",
 };
 
 export interface Transaction {

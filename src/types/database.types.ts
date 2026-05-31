@@ -1265,7 +1265,7 @@ export type Database = {
       currency_type: "fiat" | "crypto" | "etf"
       debt_activity_type: "payment" | "interest" | "adjustment"
       nw_item_side: "asset" | "liability"
-      transaction_type: "income" | "expense" | "transfer" | "correction"
+      transaction_type: "income" | "expense" | "transfer" | "correction" | "investment"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1413,7 +1413,7 @@ export const Constants = {
       currency_type: ["fiat", "crypto", "etf"],
       debt_activity_type: ["payment", "interest", "adjustment"],
       nw_item_side: ["asset", "liability"],
-      transaction_type: ["income", "expense", "transfer", "correction"],
+      transaction_type: ["income", "expense", "transfer", "correction", "investment"],
     },
   },
 } as const
