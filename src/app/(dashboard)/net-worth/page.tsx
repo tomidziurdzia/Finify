@@ -165,7 +165,8 @@ function NetWorthContent({
       safeAssetsSummary.accounts.map((account) => ({
         ...account,
         investment_value_base:
-          safeCurrentInvestmentValues[account.id] ?? account.investment_value_base,
+          safeCurrentInvestmentValues[account.id]?.current ??
+          account.investment_value_base,
       })),
     [safeAssetsSummary.accounts, safeCurrentInvestmentValues],
   );

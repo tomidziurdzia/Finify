@@ -475,7 +475,7 @@ export async function deleteInvestment(
 }
 
 export async function getCurrentInvestmentValuesByAccount(): Promise<
-  ActionResult<Record<string, number>>
+  ActionResult<Record<string, { current: number; cost: number }>>
 > {
   try {
     const userId = await getUserId();
@@ -550,19 +550,27 @@ export async function getCurrentInvestmentValuesByAccount(): Promise<
     const prices = priceMapResult.data;
     const today = new Date().toISOString().slice(0, 10);
     const fxCache = new Map<string, number>();
-    const totalsByAccount: Record<string, number> = {};
+    const totalsByAccount: Record<string, { current: number; cost: number }> = {};
+
+    const add = (accountId: string, current: number, cost: number) => {
+      const entry = totalsByAccount[accountId] ?? { current: 0, cost: 0 };
+      entry.current += current;
+      entry.cost += cost;
+      totalsByAccount[accountId] = entry;
+    };
 
     for (const holding of grouped.values()) {
       const marketPrice = prices[holding.price_key];
 
       if (marketPrice == null) {
-        totalsByAccount[holding.account_id] =
-          (totalsByAccount[holding.account_id] ?? 0) + holding.total_cost;
+        // No live price — treat current value as the cost basis (flat).
+        add(holding.account_id, holding.total_cost, holding.total_cost);
         continue;
       }
 
-      let currentValueBase = holding.quantity * marketPrice;
-
+      // Convert both the current value and the cost basis with the same factor
+      // so they share a currency and the gain/loss % is meaningful.
+      let factor = 1;
       if (holding.asset_type !== "crypto" && holding.currency !== baseCurrency) {
         const key = `${today}:${holding.currency}:${baseCurrency}`;
         let fxRate = fxCache.get(key);
@@ -576,11 +584,14 @@ export async function getCurrentInvestmentValuesByAccount(): Promise<
           fxRate = fxResult.data;
           fxCache.set(key, fxRate);
         }
-        currentValueBase *= fxRate;
+        factor = fxRate;
       }
 
-      totalsByAccount[holding.account_id] =
-        (totalsByAccount[holding.account_id] ?? 0) + currentValueBase;
+      add(
+        holding.account_id,
+        holding.quantity * marketPrice * factor,
+        holding.total_cost * factor,
+      );
     }
 
     return { data: totalsByAccount };

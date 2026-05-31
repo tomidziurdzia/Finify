@@ -17,6 +17,7 @@ import {
   StickyNote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -62,7 +63,10 @@ import {
   useTransactions,
   useDeleteTransaction,
 } from "@/hooks/useTransactions";
-import { useInvestments } from "@/hooks/useInvestments";
+import {
+  useInvestments,
+  useCurrentInvestmentValuesByAccount,
+} from "@/hooks/useInvestments";
 import {
   useMonths,
   useEnsureCurrentMonth,
@@ -269,8 +273,10 @@ export function TransactionsTable() {
     openingBalances,
   );
   const { data: allInvestments } = useInvestments();
+  const { data: currentInvestmentByAccount } =
+    useCurrentInvestmentValuesByAccount();
 
-  // Sum investment total_cost per account (in base currency via currency_symbol)
+  // Sum investment total_cost per account (in the account's currency).
   const investmentByAccount = useMemo(() => {
     const map = new Map<string, number>();
     if (!allInvestments) return map;
@@ -549,6 +555,8 @@ export function TransactionsTable() {
         selectedMonth={selectedMonth}
         accountMonthlyBalances={accountMonthlyBalances}
         investmentByAccount={investmentByAccount}
+        currentInvestmentByAccount={currentInvestmentByAccount}
+        baseCurrencySymbol={baseCurrencySymbol}
       />
 
       <div className="flex flex-wrap items-start justify-start gap-2">
@@ -986,25 +994,65 @@ const TransactionsAccountBalances = memo(function TransactionsAccountBalances({
   selectedMonth,
   accountMonthlyBalances,
   investmentByAccount,
+  currentInvestmentByAccount,
+  baseCurrencySymbol,
 }: {
   selectedMonth: Month | null;
   accountMonthlyBalances: ReturnType<typeof useMonthSummary>["accountMonthlyBalances"];
   investmentByAccount: Map<string, number>;
+  currentInvestmentByAccount:
+    | Record<string, { current: number; cost: number }>
+    | undefined;
+  baseCurrencySymbol: string;
 }) {
+  const [hideZero, setHideZero] = useState(false);
+
   if (!selectedMonth) return null;
+
+  const isZeroAccount = (
+    account: (typeof accountMonthlyBalances)[number],
+  ) => {
+    if (account.opening !== 0 || account.closing !== 0) return false;
+    const live = currentInvestmentByAccount?.[account.accountId];
+    if (live && (live.current !== 0 || live.cost !== 0)) return false;
+    if ((investmentByAccount.get(account.accountId) ?? 0) !== 0) return false;
+    return true;
+  };
+
+  const visibleAccounts = hideZero
+    ? accountMonthlyBalances.filter((account) => !isZeroAccount(account))
+    : accountMonthlyBalances;
 
   return (
     <div className="rounded-md border p-3 sm:p-4">
-      <p className="text-base font-semibold">
-        Saldos por cuenta - {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
-      </p>
-      <p className="text-muted-foreground mb-3 text-xs">
-        Inicio y cierre del mes seleccionado.
-      </p>
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          <p className="text-base font-semibold">
+            Saldos por cuenta - {MONTH_NAMES[selectedMonth.month - 1]} {selectedMonth.year}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            Inicio y cierre del mes seleccionado.
+          </p>
+        </div>
+        <label className="text-muted-foreground flex cursor-pointer items-center gap-2 whitespace-nowrap text-xs">
+          <Checkbox
+            checked={hideZero}
+            onCheckedChange={(checked) => setHideZero(checked === true)}
+          />
+          Ocultar cuentas en cero
+        </label>
+      </div>
       {accountMonthlyBalances.length > 0 ? (
+        visibleAccounts.length > 0 ? (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {accountMonthlyBalances.map((account) => {
+          {visibleAccounts.map((account) => {
+            const live = currentInvestmentByAccount?.[account.accountId];
+            const hasLive = live != null && live.cost > 0;
             const invTotal = investmentByAccount.get(account.accountId) ?? 0;
+            const gain = hasLive ? live.current - live.cost : 0;
+            const gainPct = hasLive ? (gain / live.cost) * 100 : 0;
+            const up = gain >= 0;
+            const gainTone = up ? "text-green-600" : "text-red-600";
             return (
               <div key={account.name} className="bg-muted/20 space-y-2 rounded-md border px-3 py-2.5">
                 <p className="text-foreground truncate text-sm font-semibold">
@@ -1022,18 +1070,45 @@ const TransactionsAccountBalances = memo(function TransactionsAccountBalances({
                     {account.symbol} {formatAmount(account.closing)}
                   </span>
                 </div>
-                {invTotal > 0 && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-muted-foreground">Inversiones</span>
-                    <span className="whitespace-nowrap text-sm font-semibold text-indigo-600">
-                      {account.symbol} {formatAmount(invTotal)}
-                    </span>
-                  </div>
+                {hasLive ? (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Invertido</span>
+                      <span className="whitespace-nowrap text-sm font-semibold text-indigo-600">
+                        {baseCurrencySymbol} {formatAmount(live.cost)}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-muted-foreground">Valor actual</span>
+                      <span className="text-right">
+                        <span className={`block whitespace-nowrap text-sm font-semibold ${gainTone}`}>
+                          {baseCurrencySymbol} {formatAmount(live.current)}
+                        </span>
+                        <span className={`block text-xs font-medium ${gainTone}`}>
+                          {up ? "▲" : "▼"} {formatAmount(Math.abs(gainPct))}%
+                        </span>
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  invTotal > 0 && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Inversiones</span>
+                      <span className="whitespace-nowrap text-sm font-semibold text-indigo-600">
+                        {account.symbol} {formatAmount(invTotal)}
+                      </span>
+                    </div>
+                  )
                 )}
               </div>
             );
           })}
         </div>
+        ) : (
+          <p className="text-muted-foreground text-sm">
+            Todas las cuentas están en cero.
+          </p>
+        )
       ) : (
         <p className="text-muted-foreground text-sm">
           No hay saldos iniciales cargados para este mes.
