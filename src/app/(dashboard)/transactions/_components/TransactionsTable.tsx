@@ -102,6 +102,7 @@ const TYPE_BADGE_STYLES: Record<string, string> = {
   expense: "bg-red-100 text-red-800 hover:bg-red-100",
   transfer: "bg-blue-100 text-blue-800 hover:bg-blue-100",
   correction: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
+  investment: "bg-indigo-100 text-indigo-800 hover:bg-indigo-100",
 };
 
 const AMOUNT_COLOR: Record<string, string> = {
@@ -109,6 +110,7 @@ const AMOUNT_COLOR: Record<string, string> = {
   expense: "text-red-600",
   transfer: "text-blue-600",
   correction: "text-yellow-600",
+  investment: "text-indigo-600",
 };
 
 export function TransactionsTable() {
@@ -579,6 +581,7 @@ export function TransactionsTable() {
             <SelectItem value="expense">Gasto</SelectItem>
             <SelectItem value="transfer">Transferencia</SelectItem>
             <SelectItem value="correction">Corrección</SelectItem>
+            <SelectItem value="investment">Inversión</SelectItem>
           </SelectContent>
         </Select>
         <Select
