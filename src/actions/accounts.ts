@@ -263,7 +263,9 @@ export async function createAccount(
 
     if (error) {
       if (error.code === "23505") {
-        return { error: "Ya existe una cuenta con ese nombre y moneda" };
+        return {
+          error: "Ya existe una cuenta con ese nombre, moneda y tipo",
+        };
       }
       return { error: error.message };
     }
@@ -361,7 +363,9 @@ export async function updateAccount(
 
     if (error) {
       if (error.code === "23505") {
-        return { error: "Ya existe una cuenta con ese nombre y moneda" };
+        return {
+          error: "Ya existe una cuenta con ese nombre, moneda y tipo",
+        };
       }
       return { error: error.message };
     }
